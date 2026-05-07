@@ -135,7 +135,13 @@ function App() {
     try {
       const response = await api('/verify', {
         method: 'POST',
-        body: JSON.stringify({ article, question: activeQuestion, options: activeOptions, selected_option: selected }),
+        body: JSON.stringify({
+          article,
+          question: activeQuestion,
+          options: activeOptions,
+          selected_option: selected,
+          correct_option: activeQuiz?.predicted_correct_option,
+        }),
       });
       setVerificationByQuestion({ ...verificationByQuestion, [activeIndex]: response });
       refreshMetrics();
@@ -322,7 +328,7 @@ function App() {
               </div>
               <div className="rounded-md border border-slate-200 p-3">
                 <dt className="text-xs text-slate-600">Model A</dt>
-                <dd className="mt-1 font-bold">{Math.round((metrics?.model_a?.soft_voting_ensemble?.exact_match_answer_accuracy || 0) * 100)}%</dd>
+                <dd className="mt-1 font-bold">{Math.round((metrics?.model_a?.logistic_regression?.exact_match_answer_accuracy || 0) * 100)}%</dd>
               </div>
             </dl>
             <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-200 px-4 py-2 text-slate-900" onClick={exportLogs}>

@@ -25,6 +25,7 @@ class VerifyRequest(BaseModel):
     question: str = Field(..., min_length=3)
     options: Options
     selected_option: str = Field(..., pattern="^[ABCDabcd]$")
+    correct_option: str | None = Field(None, pattern="^[ABCDabcd]$")
 
 
 class Distractor(BaseModel):
