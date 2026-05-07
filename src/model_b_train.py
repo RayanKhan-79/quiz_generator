@@ -44,6 +44,20 @@ def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:
     return {"trained_on_rows": len(train_df), "vocabulary_size": len(vectorizer.vocabulary_), **config}
 
 
+def _content_tokens(text: str) -> set[str]:
+    return {token for token in str(text).lower().replace("-", " ").split() if len(token.strip(".,;:!?()[]\"'")) > 2}
+
+
+def _near_duplicate(candidate: str, answer: str) -> bool:
+    candidate_tokens = _content_tokens(candidate)
+    answer_tokens = _content_tokens(answer)
+    if not candidate_tokens or not answer_tokens:
+        return False
+    overlap = len(candidate_tokens & answer_tokens)
+    jaccard = overlap / len(candidate_tokens | answer_tokens)
+    return jaccard >= 0.34 or (overlap > 0 and min(len(candidate_tokens), len(answer_tokens)) <= 2)
+
+
 def rank_distractors(article: str, question: str, answer: str, vectorizer: TfidfVectorizer, existing_options: list[str] | None = None) -> list[dict[str, float | str]]:
     existing_options = existing_options or []
     answer_key = answer.strip().lower()
@@ -53,7 +67,7 @@ def rank_distractors(article: str, question: str, answer: str, vectorizer: Tfidf
     seen: set[str] = set()
     for candidate in candidates:
         key = candidate.strip().lower()
-        if not key or key == answer_key or answer_key in key or key in answer_key or key in seen:
+        if not key or key == answer_key or answer_key in key or key in answer_key or key in seen or _near_duplicate(candidate, answer):
             continue
         seen.add(key)
         unique.append(candidate.strip())

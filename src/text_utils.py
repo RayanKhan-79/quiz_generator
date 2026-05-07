@@ -31,8 +31,33 @@ def extract_candidate_phrases(text: str, max_candidates: int = 80) -> list[str]:
     return unique[:max_candidates]
 
 
-def redact_answer(sentence: str, answer: str) -> str:
+def extract_answer_candidates(sentence: str, max_candidates: int = 10) -> list[str]:
+    text = sentence or ""
+    candidates: list[str] = []
+    candidates.extend(match.group(0).strip() for match in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b", text))
+    candidates.extend(match.group(0).strip() for match in re.finditer(r"\b\d+(?:[.,]\d+)?(?:\s?(?:percent|years?|days?|miles?|km|dollars?))?\b", text, flags=re.IGNORECASE))
+    tokens = [token for token in re.findall(r"[A-Za-z][A-Za-z'-]{3,}", text) if token.lower() not in ENGLISH_STOP_WORDS]
+    for size in (3, 2, 1):
+        for index in range(0, max(len(tokens) - size + 1, 0)):
+            phrase = " ".join(tokens[index : index + size])
+            if phrase:
+                candidates.append(phrase)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        cleaned = candidate.strip(" ,.;:!?()[]\"'")
+        key = cleaned.lower()
+        if len(cleaned) < 4 or key in seen:
+            continue
+        seen.add(key)
+        unique.append(cleaned)
+        if len(unique) >= max_candidates:
+            break
+    return unique
+
+
+def redact_answer(sentence: str, answer: str, count: int = 0) -> str:
     if not answer:
         return sentence
     pattern = re.compile(re.escape(answer), flags=re.IGNORECASE)
-    return pattern.sub("____", sentence)
+    return pattern.sub("____", sentence, count=count)

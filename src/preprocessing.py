@@ -51,6 +51,8 @@ def _first_existing(df: pd.DataFrame, names: Iterable[str]) -> str | None:
 def _extract_option(options: object, index: int) -> str:
     if isinstance(options, (list, tuple)):
         return clean_text(options[index]) if len(options) > index else ""
+    if hasattr(options, "__len__") and hasattr(options, "__getitem__") and not isinstance(options, (str, bytes, dict)):
+        return clean_text(options[index]) if len(options) > index else ""
     if isinstance(options, str):
         stripped = options.strip()
         try:
