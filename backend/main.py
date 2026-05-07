@@ -7,7 +7,7 @@ from fastapi.responses import PlainTextResponse
 from backend.schemas import GenerateRequest, GenerateResponse, VerifyRequest, VerifyResponse
 from src.inference import QuizEngine
 
-app = FastAPI(title="RACE TF-IDF Quiz Generator", version="1.0.0")
+app = FastAPI(title="Quiz Generator", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -48,7 +48,7 @@ def generate(payload: GenerateRequest):
 @app.post("/verify", response_model=VerifyResponse)
 def verify(payload: VerifyRequest):
     try:
-        return engine.verify(payload.article, payload.question, payload.options.as_dict(), payload.selected_option)
+        return engine.verify(payload.article, payload.question, payload.options.as_dict(), payload.selected_option, payload.correct_option)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
