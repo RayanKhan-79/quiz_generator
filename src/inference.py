@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,7 +17,12 @@ import pandas as pd
 from src.model_a_train import MODEL_DIR as MODEL_A_DIR
 from src.model_a_train import build_feature_blocks
 from src.model_b_train import MODEL_DIR as MODEL_B_DIR
-from src.model_b_train import generate_hints, rank_distractors
+from src.model_b_train import generate_hints, rank_distractors, rank_generation_sentence_answer_pairs
+from src.question_generation import (
+    make_definition_question,
+    make_wh_question_candidates,
+    select_question_candidate,
+)
 from src.preprocessing import OPTION_LABELS, PROCESSED_DIR, preprocess_all
 from src.text_utils import extract_answer_candidates, redact_answer, split_sentences
 
@@ -64,11 +70,52 @@ class QuizEngine:
             self.svm = joblib.load(self.model_a_dir / "linear_svm_calibrated.joblib")
             self.question_vectorizer = joblib.load(self.model_a_dir / "question_tfidf_vectorizer.joblib")
             self.direct_logistic = joblib.load(self.model_a_dir / "direct_multiclass_logistic.joblib")
+            self.question_ranker_vec = None
+            self.question_ranker_clf = None
+            ranker_vec_path = self.model_a_dir / "question_ranker_vectorizer.joblib"
+            ranker_clf_path = self.model_a_dir / "question_ranker.joblib"
+            if ranker_vec_path.exists() and ranker_clf_path.exists():
+                try:
+                    self.question_ranker_vec = joblib.load(ranker_vec_path)
+                    self.question_ranker_clf = joblib.load(ranker_clf_path)
+                except Exception:
+                    self.question_ranker_vec = None
+                    self.question_ranker_clf = None
             self.model_a_loaded = True
         except Exception as exc:  # artifacts are optional during first setup
             self.model_a_error = str(exc)
         try:
             self.vectorizer_b = joblib.load(self.model_b_dir / "tfidf_vectorizer.joblib")
+            self.model_b_config: dict[str, Any] = {}
+            cfg_path = self.model_b_dir / "config.json"
+            if cfg_path.exists():
+                with cfg_path.open("r", encoding="utf-8") as handle:
+                    self.model_b_config = json.load(handle)
+            self.w2v_b = None
+            w2v_meta = self.model_b_config.get("word2vec") or {}
+            w2v_file = w2v_meta.get("file", "word2vec.kv")
+            w2v_path = self.model_b_dir / str(w2v_file)
+            if w2v_path.exists():
+                try:
+                    from gensim.models import KeyedVectors
+
+                    self.w2v_b = KeyedVectors.load(str(w2v_path), mmap="r")
+                except Exception:
+                    self.w2v_b = None
+            self.distractor_ranker = None
+            ranker_path = self.model_b_dir / "distractor_ranker.joblib"
+            if ranker_path.exists():
+                try:
+                    self.distractor_ranker = joblib.load(ranker_path)
+                except Exception:
+                    self.distractor_ranker = None
+            self.hint_scorer = None
+            scorer_path = self.model_b_dir / "hint_scorer.joblib"
+            if scorer_path.exists():
+                try:
+                    self.hint_scorer = joblib.load(scorer_path)
+                except Exception:
+                    self.hint_scorer = None
             self.model_b_loaded = True
         except Exception as exc:
             self.model_b_error = str(exc)
@@ -78,6 +125,7 @@ class QuizEngine:
             "status": "ok",
             "model_a_loaded": self.model_a_loaded,
             "model_b_loaded": self.model_b_loaded,
+            "model_b_word2vec_loaded": bool(getattr(self, "w2v_b", None)),
             "model_a_error": getattr(self, "model_a_error", None),
             "model_b_error": getattr(self, "model_b_error", None),
         }
@@ -107,7 +155,12 @@ class QuizEngine:
         df = self._question_frame(article, question, options)
         x = build_feature_blocks(df, self.vectorizer_a, fit=False)
         probabilities = self.logistic.predict_proba(x)[:, 1]
-        best_index = int(np.argmax(probabilities))
+        evidence = self._passage_evidence_scores(article, question, options)
+        # Blend Model A probabilities with a passage-evidence signal so factoid questions
+        # whose answer literally co-occurs with question keywords in a sentence rank higher.
+        prob_norm = probabilities / probabilities.sum() if probabilities.sum() > 0 else probabilities
+        combined = 0.65 * prob_norm + 0.35 * evidence
+        best_index = int(np.argmax(combined))
         model_predicted = str(df.iloc[best_index]["option_label"])
         predicted = correct_option.upper() if correct_option else model_predicted
         selected = selected_option.upper()
@@ -122,31 +175,105 @@ class QuizEngine:
             "explanation": (
                 f"This generated cloze question is keyed to option {predicted}; Model A independently ranked option {model_predicted} highest."
                 if correct_option
-                else f"TF-IDF verifier ranked option {predicted} highest using the trained ensemble plus article/question similarity evidence."
+                else f"TF-IDF verifier ranked option {predicted} highest using Model A probabilities blended with passage co-occurrence evidence."
             ),
             "latency_ms": latency_ms,
         }
         self.store.add({"endpoint": "verify", "latency_ms": latency_ms, "predicted_option": predicted, "selected_option": selected})
         return result
 
+    def _passage_evidence_scores(self, article: str, question: str, options: dict[str, str]) -> np.ndarray:
+        """Score each option by how strongly its words co-occur with the question's content
+        words inside the same article sentence. Helps factoid questions whose answer is
+        literally stated near the question keywords (e.g. 'Who was ill?' -> 'X was ill')."""
+        stopwords = {
+            "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+            "of", "to", "in", "on", "at", "by", "for", "with", "as", "and", "or",
+            "but", "not", "so", "that", "this", "these", "those", "it", "its",
+            "he", "she", "they", "we", "you", "i", "his", "her", "their", "our",
+            "my", "your", "what", "who", "whom", "when", "where", "why", "how",
+            "which", "do", "does", "did", "from", "into", "than", "then", "also",
+        }
+
+        def tokenize(text: str) -> list[str]:
+            tokens = []
+            for raw in text.split():
+                cleaned = raw.strip(".,;:!?\"'()[]_").lower()
+                if cleaned and cleaned not in stopwords and len(cleaned) > 1:
+                    tokens.append(cleaned)
+            return tokens
+
+        sentences = split_sentences(article) or [article]
+        sentence_tokens = [set(tokenize(sent)) for sent in sentences]
+        question_tokens = set(tokenize(question))
+        scores = np.zeros(len(OPTION_LABELS), dtype=float)
+
+        for i, label in enumerate(OPTION_LABELS):
+            option_text = options.get(label, "")
+            option_tokens = set(tokenize(option_text))
+            if not option_tokens:
+                continue
+            best = 0.0
+            for sent_set in sentence_tokens:
+                if not sent_set:
+                    continue
+                q_overlap = len(question_tokens & sent_set)
+                o_overlap = len(option_tokens & sent_set)
+                if o_overlap == 0:
+                    continue
+                pair_score = (q_overlap + 1) * o_overlap / max(len(sent_set), 1)
+                if pair_score > best:
+                    best = pair_score
+            scores[i] = best
+
+        if scores.max() > 0:
+            scores = scores / scores.max()
+        else:
+            scores = np.full(len(OPTION_LABELS), 0.25)
+        return scores
+
     def generate(self, article: str, question: str | None = None, options: dict[str, str] | None = None, question_count: int = 5) -> dict[str, Any]:
         started = time.perf_counter()
         if not self.model_b_loaded:
             raise RuntimeError("Model B artifacts are missing. Run: python -m src.model_b_train")
         options = options or {}
-        generated_questions = self._question_specs(article, question, options, max(5, question_count))
+        generated_questions = self._question_specs(article, question, options, max(1, int(question_count)))
+        cfg = getattr(self, "model_b_config", {}) or {}
+        w2v_section = cfg.get("word2vec") or {}
         items = []
         for index, spec in enumerate(generated_questions):
             generated_question = spec["question"]
             answer = spec["answer"]
-            distractors = rank_distractors(article, generated_question, answer, self.vectorizer_b, list(options.values()))
-            final_options = self._merge_options(answer, distractors, options, seed=index)
-            hints = self._hints_for_spec(article, generated_question, answer, spec.get("sentence", ""))
+            use_user_options = bool(spec.get("use_provided_options"))
+            merge_options = options if use_user_options else {}
+            existing_for_rank = list(options.values()) if use_user_options else []
+            distractors = rank_distractors(
+                article,
+                generated_question,
+                answer,
+                self.vectorizer_b,
+                existing_for_rank,
+                w2v=getattr(self, "w2v_b", None),
+                distractor_w2v_blend=float(w2v_section.get("distractor_blend_weight", 0.38)),
+                ranker=getattr(self, "distractor_ranker", None),
+                ranker_weight=float(cfg.get("distractor_ranker_weight", 0.6)),
+            )
+            final_options = self._merge_options(answer, distractors, merge_options, seed=index)
             confidence = 0.0
-            predicted = self._label_for_answer(final_options, answer)
-            if self.model_a_loaded:
+            if use_user_options and self.model_a_loaded:
+                # User supplied the question and all four options: we don't know the
+                # ground-truth answer, so let Model A (blended with passage evidence)
+                # pick the most likely correct option.
                 verification = self.verify(article, generated_question, final_options, "A")
+                predicted = verification["predicted_option"]
+                answer = final_options.get(predicted, answer)
                 confidence = verification["confidence"]
+            else:
+                predicted = self._label_for_answer(final_options, answer)
+                if self.model_a_loaded:
+                    verification = self.verify(article, generated_question, final_options, predicted, correct_option=predicted)
+                    confidence = verification["confidence"]
+            hints = self._hints_for_spec(article, generated_question, answer, spec.get("sentence", ""))
             items.append(
                 {
                     "question": generated_question,
@@ -225,26 +352,155 @@ class QuizEngine:
         return np.array([by_label[label] for label in OPTION_LABELS], dtype=float)
 
     def _question_specs(self, article: str, provided_question: str | None, options: dict[str, str], count: int) -> list[dict[str, str]]:
-        sentences = self._rank_generation_sentences(article)
-        if not sentences:
-            sentences = [article[index : index + 180] for index in range(0, max(len(article), 1), 180) if article[index : index + 180].strip()]
         specs: list[dict[str, str]] = []
         if provided_question and all(options.get(label) for label in OPTION_LABELS):
-            specs.append({"question": provided_question, "answer": options["A"], "sentence": ""})
-        index = 0
-        while len(specs) < count:
-            sentence = sentences[index % len(sentences)]
-            answer = self._answer_for_sentence(sentence)
-            redacted = redact_answer(sentence, answer, count=1)
             specs.append(
                 {
-                    "question": f"Which option best completes this sentence from the passage: {redacted}",
-                    "answer": answer,
-                    "sentence": sentence,
+                    "question": provided_question,
+                    "answer": options["A"],
+                    "sentence": "",
+                    "use_provided_options": True,
                 }
             )
-            index += 1
+        if len(specs) >= count:
+            return specs[:count]
+
+        cfg = getattr(self, "model_b_config", {}) or {}
+        w2v_section = cfg.get("word2vec") or {}
+        if self.model_a_loaded:
+            gen_vec = self.vectorizer_a
+            gen_w2v = None
+            gen_blend = 0.0
+        else:
+            gen_vec = self.vectorizer_b
+            gen_w2v = getattr(self, "w2v_b", None)
+            gen_blend = float(w2v_section.get("generation_blend_weight", w2v_section.get("distractor_blend_weight", 0.38)))
+
+        ranked_pairs = rank_generation_sentence_answer_pairs(
+            article,
+            gen_vec,
+            w2v=gen_w2v,
+            generation_w2v_blend=gen_blend,
+        )
+
+        heuristic_sents = self._rank_generation_sentences(article)
+        if not heuristic_sents:
+            heuristic_sents = [
+                article[index : index + 180] for index in range(0, max(len(article), 1), 180) if article[index : index + 180].strip()
+            ]
+
+        # Pre-build definition-style specs (X is Y → "What does 'X' refer to?")
+        definition_specs: list[dict[str, str]] = []
+        seen_def_subjects: set[str] = set()
+        for sentence in split_sentences(article):
+            built = make_definition_question(sentence)
+            if not built:
+                continue
+            stem, predicate, original = built
+            subject_match = re.search(r'"([^"]+)"', stem)
+            subject_key = subject_match.group(1).lower() if subject_match else stem.lower()
+            if subject_key in seen_def_subjects:
+                continue
+            seen_def_subjects.add(subject_key)
+            definition_specs.append(
+                {
+                    "question": stem,
+                    "answer": predicate,
+                    "sentence": original,
+                    "wh": "what",
+                }
+            )
+
+        used_sentence_keys: set[str] = set()
+        used_answer_keys: set[str] = set()
+        pair_index = 0
+        legacy_index = 0
+        def_index = 0
+
+        while len(specs) < count:
+            # Interleave: take a definition spec roughly every 3 questions so a
+            # 5-question quiz mixes definition stems with the regular pair pool.
+            inject_definition = def_index < len(definition_specs) and (len(specs) % 3 == 1)
+            if inject_definition:
+                spec = definition_specs[def_index]
+                def_index += 1
+                sk = spec["sentence"].strip().lower()
+                ak = spec["answer"].strip().lower()
+                if sk in used_sentence_keys or ak in used_answer_keys:
+                    continue
+                used_sentence_keys.add(sk)
+                used_answer_keys.add(ak)
+                specs.append(spec)
+                continue
+
+            if pair_index < len(ranked_pairs):
+                _score, sentence, answer = ranked_pairs[pair_index]
+                pair_index += 1
+                sk, ak = sentence.strip().lower(), answer.strip().lower()
+                if sk in used_sentence_keys or ak in used_answer_keys:
+                    continue
+                used_sentence_keys.add(sk)
+                used_answer_keys.add(ak)
+                question_text, wh_label_text = self._best_wh_question(article, sentence, answer, style_index=len(specs))
+                specs.append(
+                    {
+                        "question": question_text,
+                        "answer": answer,
+                        "sentence": sentence,
+                        "wh": wh_label_text,
+                    }
+                )
+                continue
+
+            if def_index < len(definition_specs):
+                spec = definition_specs[def_index]
+                def_index += 1
+                sk = spec["sentence"].strip().lower()
+                ak = spec["answer"].strip().lower()
+                if sk in used_sentence_keys or ak in used_answer_keys:
+                    continue
+                used_sentence_keys.add(sk)
+                used_answer_keys.add(ak)
+                specs.append(spec)
+                continue
+
+            sentence = heuristic_sents[legacy_index % len(heuristic_sents)]
+            legacy_index += 1
+            answer = self._answer_for_sentence(sentence)
+            sk, ak = sentence.strip().lower(), answer.strip().lower()
+            allow_dup = legacy_index > len(heuristic_sents) * 8
+            if (sk in used_sentence_keys or ak in used_answer_keys) and not allow_dup:
+                continue
+            used_sentence_keys.add(sk)
+            used_answer_keys.add(ak)
+            question_text, wh_label_text = self._best_wh_question(article, sentence, answer, style_index=len(specs))
+            specs.append(
+                {
+                    "question": question_text,
+                    "answer": answer,
+                    "sentence": sentence,
+                    "wh": wh_label_text,
+                }
+            )
+
         return specs[:count]
+
+    def _best_wh_question(self, article: str, sentence: str, answer: str, style_index: int = 0) -> tuple[str, str]:
+        cloze_fallback = (
+            f"{redact_answer(sentence, answer, count=1).rstrip('.!? ')}.",
+            "which",
+        )
+        candidates = make_wh_question_candidates(sentence, answer)
+        if not candidates:
+            return cloze_fallback
+        chosen = select_question_candidate(
+            candidates,
+            article,
+            style_index,
+            self.question_ranker_vec,
+            self.question_ranker_clf,
+        )
+        return chosen["question"], chosen.get("wh", "what")
 
     def _rank_generation_sentences(self, article: str) -> list[str]:
         sentences = split_sentences(article)
@@ -267,7 +523,18 @@ class QuizEngine:
 
     def _hints_for_spec(self, article: str, question: str, answer: str, sentence: str) -> list[str]:
         if not sentence:
-            return generate_hints(article, question, answer, self.vectorizer_b)
+            cfg = getattr(self, "model_b_config", {}) or {}
+            w2v_section = cfg.get("word2vec") or {}
+            return generate_hints(
+                article,
+                question,
+                answer,
+                self.vectorizer_b,
+                w2v=getattr(self, "w2v_b", None),
+                hint_w2v_blend=float(w2v_section.get("hint_blend_weight", 0.42)),
+                hint_scorer=getattr(self, "hint_scorer", None),
+                hint_scorer_weight=float(cfg.get("hint_scorer_weight", 0.4)),
+            )
         return [
             "Look for the passage sentence that contains the missing detail.",
             redact_answer(sentence, answer, count=1),

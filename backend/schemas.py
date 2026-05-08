@@ -17,7 +17,7 @@ class GenerateRequest(BaseModel):
     article: str = Field(..., min_length=20)
     question: str | None = None
     options: Options | None = None
-    question_count: int = Field(5, ge=5, le=10)
+    question_count: int = Field(5, ge=1, le=10)
 
 
 class VerifyRequest(BaseModel):
