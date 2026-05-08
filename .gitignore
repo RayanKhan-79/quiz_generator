@@ -5,14 +5,12 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 venv/
+.venv/
 *.log
 
 data/processed/*.csv
 data/processed/*.parquet
 data/processed/*.json
-models/**/*.joblib
-models/**/*.json
-models/**/*.csv
 
 ui/node_modules/
 ui/dist/

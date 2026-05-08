@@ -40,7 +40,42 @@ python -m src.evaluate
 
 Processed datasets are written to `data/processed/`. Model artifacts are written to `models/model_a/` and `models/model_b/`. The loader supports Parquet `options` values stored as array-like objects and expands them into populated `A/B/C/D` fields.
 
-Model A reports option-level Logistic Regression, calibrated Linear SVM, the soft-voting ensemble, and auxiliary direct multiclass baselines. After fixing option extraction and retraining, the validation exact-match answer accuracy for option-level Logistic Regression is about 41.8%, and the current saved test split evaluation is about 37.8%.
+Model B fits a TF-IDF vectorizer plus a **Word2Vec** model (skip-gram) on passage sentences, questions, and options. Distractor ranking and hint sentence selection blend TF-IDF cosine similarity with mean-pooled Word2Vec cosine similarity (weights in `models/model_b/config.json` under `word2vec`). After retraining, `word2vec.kv` is written next to the TF-IDF joblib; if that file is missing, inference falls back to TF-IDF only.
+
+Cloze **question stems** are chosen by ranking passage sentences against candidate answer phrases: for each pair where the answer text appears in the sentence, the score is cosine similarity between TF-IDF vectors of the sentence and of the answer (Model A’s vectorizer when Model A is loaded, otherwise Model B’s), optionally blended with Word2Vec when using Model B’s vectorizer (`generation_blend_weight` in config). Top-scoring unique (sentence, answer) pairs are emitted first; any remaining slots use the previous heuristic sentence ranker.
+
+### Model A (verifier + question generator)
+
+Model A trains a stack of classical ML models on the option-level binary task plus auxiliary direct multiclass baselines:
+
+- **Logistic Regression** and **Linear SVM (calibrated)** on TF-IDF + cosine-similarity features.
+- **Multinomial Naive Bayes** verifier and a separate **Wh-type Naive Bayes** question classifier.
+- **Random Forest** (subsample) and optional **XGBoost** verifier.
+- **One-Hot Encoding** baseline (binary `CountVectorizer`) wired to its own Logistic Regression for an OHE-vs-TF-IDF comparison.
+- **Soft voting** (LR + SVM, and LR+SVM+NB+RF) and a **stacking classifier** (LR meta-learner over LR/SVM/NB/RF).
+- **Unsupervised / semi-supervised**: KMeans purity + cluster counts, KMeans silhouette on a SVD-reduced subsample, **Gaussian Mixture** clustering with purity/silhouette, **Label Propagation** semi-supervised baseline (kNN affinity, 15% labels).
+- A **question ranker** (Logistic Regression over CountVectorizer features + lexical signals) trained on real RACE questions vs templated synthetics; this scores Wh-template candidates at inference time.
+
+Metrics, a unified `model_comparison` table, and clustering diagnostics are written to `models/model_a/metrics.json`.
+
+### Model B (distractors + hints)
+
+Model B writes TF-IDF + Word2Vec artifacts and two trained models:
+
+- **Distractor ranker** — Logistic Regression on per-candidate features (TF-IDF answer/question cosine, Word2Vec answer/question cosine, passage frequency, character-level overlap, candidate length, token-overlap-with-answer). It blends with the heuristic weighted score at inference (`distractor_ranker_weight` in `config.json`).
+- **Hint scorer** — a Ridge regression over (keyword overlap, position, length, first-token match, contains-answer-token). At inference its predictions blend with the TF-IDF/W2V cosine ranking; `R²` is reported on validation.
+- **Frequency-substitution distractors** — alternative pipeline that picks article phrases with frequency closest to the gold answer.
+
+`models/model_b/config.json` includes the distractor / hint blend weights, the trained-ranker validation metrics, and a `evaluation` block with **distractor Precision/Recall/F1**, **ranker top-1-not-answer accuracy**, and **hint Precision@K / contains-answer rate**.
+
+### Evaluation
+
+`python -m src.evaluate` writes `models/evaluation_metrics.json` with: Model A exact-match / macro F1 / precision / recall / confusion matrix on the test split, plus the same Model B distractor and hint metrics on a sampled subset.
+
+## Tests & EDA
+
+- `notebooks/EDA.ipynb` — passage length distributions, answer label balance, Wh-type counts, option length statistics, and a heuristic answer-type taxonomy.
+- `python -m unittest discover tests` — fast smoke tests for `QuizEngine`, Wh-template generation, character-level matching, distractor features, and frequency substitution.
 
 ## Backend
 

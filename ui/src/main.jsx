@@ -1,10 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BarChart3, CheckCircle2, Download, Lightbulb, Loader2, Play, RefreshCcw, Send, Upload, XCircle } from 'lucide-react';
+import {
+  Activity,
+  BarChart3,
+  Brain,
+  CheckCircle2,
+  ChevronRight,
+  Cpu,
+  Download,
+  FileText,
+  GaugeCircle,
+  Lightbulb,
+  Loader2,
+  Play,
+  RefreshCcw,
+  Send,
+  Sparkles,
+  Trophy,
+  Upload,
+  XCircle,
+  Zap,
+} from 'lucide-react';
 import './index.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const emptyOptions = { A: '', B: '', C: '', D: '' };
+const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -24,28 +45,653 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+function StatusPill({ status }) {
+  if (!status) {
+    return (
+      <span className="pill border-white/20 bg-white/10 text-white/80">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking backend
+      </span>
+    );
+  }
+  if (status.status === 'offline') {
+    return (
+      <span className="pill border-rose-300/40 bg-rose-500/10 text-rose-100">
+        <XCircle className="h-3.5 w-3.5" /> Backend offline
+      </span>
+    );
+  }
+  const ok = status.model_a_loaded && status.model_b_loaded;
+  return (
+    <span
+      className={`pill border-white/20 ${
+        ok ? 'bg-emerald-500/15 text-emerald-100' : 'bg-amber-500/15 text-amber-100'
+      }`}
+      title="Model A: option verifier · Model B: question + distractor generator · W2V: semantic blend"
+    >
+      <Cpu className="h-3.5 w-3.5" />
+      <span className="font-semibold">A</span>
+      <span className={status.model_a_loaded ? 'text-emerald-200' : 'text-rose-200'}>
+        {status.model_a_loaded ? 'on' : 'off'}
+      </span>
+      <span className="opacity-60">·</span>
+      <span className="font-semibold">B</span>
+      <span className={status.model_b_loaded ? 'text-emerald-200' : 'text-rose-200'}>
+        {status.model_b_loaded ? 'on' : 'off'}
+      </span>
+      <span className="opacity-60">·</span>
+      <span className="font-semibold">W2V</span>
+      <span className={status.model_b_word2vec_loaded ? 'text-emerald-200' : 'text-ink-300'}>
+        {status.model_b_word2vec_loaded ? 'on' : 'off'}
+      </span>
+    </span>
+  );
+}
+
+function Header({ tab, setTab, status }) {
+  const tabs = [
+    { id: 'quiz', label: 'Quiz', icon: Sparkles },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  ];
+  return (
+    <header className="sticky top-0 z-20 border-b border-white/5 bg-gradient-to-br from-ink-900 via-brand-900 to-ink-900">
+      <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-8">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-lg shadow-brand-900/40">
+            <Brain className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold tracking-tight text-white md:text-xl">RACE Quiz Generator</h1>
+            <p className="text-xs text-ink-300">TF-IDF + Word2Vec reading-comprehension workflow</p>
+          </div>
+        </div>
+        <nav className="flex items-center gap-1 rounded-2xl border border-white/10 bg-white/5 p-1 backdrop-blur">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`tab-btn ${tab === id ? 'tab-btn-active' : ''}`}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <StatusPill status={status} />
+      </div>
+    </header>
+  );
+}
+
+const QUESTION_COUNT_OPTIONS = [3, 5, 7, 10];
+
+function ArticlePanel({
+  article,
+  setArticle,
+  question,
+  setQuestion,
+  options,
+  setOptions,
+  questionCount,
+  setQuestionCount,
+  loading,
+  onLoadSample,
+  onUpload,
+  onGenerate,
+}) {
+  const charCount = article.length;
+  const filledOptions = Object.values(options).filter(Boolean).length;
+  return (
+    <section className="surface flex h-full flex-col p-6">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-ink-900">
+            <FileText className="h-4 w-4 text-brand-600" /> Article & setup
+          </h2>
+          <p className="text-xs text-ink-500">Paste a passage or load a RACE sample to begin.</p>
+        </div>
+        <button
+          className="btn-ghost h-10 w-10 p-0"
+          onClick={onLoadSample}
+          disabled={loading === 'sample'}
+          title="Load random RACE sample"
+        >
+          {loading === 'sample' ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCcw className="h-4 w-4" />
+          )}
+        </button>
+      </div>
+
+      <div className="relative flex-1">
+        <textarea
+          className="field h-full min-h-[18rem] resize-none leading-6"
+          value={article}
+          onChange={(event) => setArticle(event.target.value)}
+          placeholder="Paste a reading passage here…"
+        />
+        <div className="pointer-events-none absolute bottom-2 right-3 text-[11px] text-ink-400">
+          {charCount.toLocaleString()} chars
+        </div>
+      </div>
+
+      <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-ink-300 bg-ink-50/60 px-4 py-2.5 text-sm font-medium text-ink-600 transition hover:border-brand-400 hover:text-brand-700">
+        <Upload className="h-4 w-4" />
+        Upload .txt article
+        <input className="sr-only" type="file" accept=".txt,text/plain" onChange={onUpload} />
+      </label>
+
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-xs font-semibold uppercase tracking-wide text-ink-600">
+            Number of questions
+          </label>
+          <span className="text-xs text-ink-500">choose 1–10</span>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {QUESTION_COUNT_OPTIONS.map((count) => {
+            const active = questionCount === count;
+            return (
+              <button
+                key={count}
+                onClick={() => setQuestionCount(count)}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                  active
+                    ? 'border-brand-500 bg-brand-50 text-brand-800 ring-2 ring-brand-200'
+                    : 'border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:bg-brand-50/40'
+                }`}
+                type="button"
+              >
+                {count}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="range"
+            min={1}
+            max={10}
+            step={1}
+            value={questionCount}
+            onChange={(event) => setQuestionCount(Number(event.target.value))}
+            className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-ink-200 accent-brand-600"
+          />
+          <span className="min-w-[2.5rem] text-right text-sm font-semibold text-brand-700">
+            {questionCount}
+          </span>
+        </div>
+      </div>
+
+      <details className="mt-4 rounded-xl border border-ink-200 bg-ink-50/60 p-4 text-sm">
+        <summary className="cursor-pointer select-none font-semibold text-ink-700">
+          Optional: anchor first question
+          <span className="ml-2 text-xs font-normal text-ink-500">
+            {filledOptions === 4 && question ? 'Will use your typed MCQ as Q1' : 'Skip to let AI generate all'}
+          </span>
+        </summary>
+        <div className="mt-3 grid gap-3">
+          <input
+            className="field"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Question stem (optional)"
+          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            {OPTION_LABELS.map((label) => (
+              <label key={label} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-2">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-ink-900 text-xs font-bold text-white">
+                  {label}
+                </span>
+                <input
+                  className="field"
+                  value={options[label]}
+                  onChange={(event) => setOptions({ ...options, [label]: event.target.value })}
+                  placeholder={`Option ${label}`}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      </details>
+
+      <button
+        className="btn-primary mt-5 h-11 w-full"
+        onClick={onGenerate}
+        disabled={loading === 'generate' || article.length < 20}
+      >
+        {loading === 'generate' ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+          </>
+        ) : (
+          <>
+            <Send className="h-4 w-4" /> Generate {questionCount} Question{questionCount === 1 ? '' : 's'}
+          </>
+        )}
+      </button>
+    </section>
+  );
+}
+
+function QuestionPanel({
+  generatedQuestions,
+  activeIndex,
+  setActiveIndex,
+  selectedByQuestion,
+  verificationByQuestion,
+  setSelectedByQuestion,
+  onVerify,
+  loading,
+}) {
+  const activeQuiz = generatedQuestions[activeIndex] || null;
+  const selected = selectedByQuestion[activeIndex] || '';
+  const verification = verificationByQuestion[activeIndex] || null;
+  const correctLabel = verification?.predicted_option || activeQuiz?.predicted_correct_option;
+  const showResult = !!verification;
+
+  return (
+    <section className="surface flex h-full flex-col p-6">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-ink-900">
+            <Sparkles className="h-4 w-4 text-brand-600" /> Question &amp; answer
+          </h2>
+          <p className="text-xs text-ink-500">
+            {generatedQuestions.length
+              ? `Question ${activeIndex + 1} of ${generatedQuestions.length}`
+              : 'Generated multiple-choice items will appear here.'}
+          </p>
+        </div>
+        {generatedQuestions.length > 0 && (
+          <span className="pill-info">
+            <Sparkles className="h-3.5 w-3.5" /> AI-generated
+          </span>
+        )}
+      </div>
+
+      {generatedQuestions.length > 0 && (
+        <div className="mb-5 flex flex-wrap gap-2">
+          {generatedQuestions.map((item, index) => {
+            const sel = selectedByQuestion[index];
+            const ver = verificationByQuestion[index];
+            const answered = !!ver;
+            const correct = ver?.is_correct;
+            const isActive = activeIndex === index;
+            return (
+              <button
+                key={`${item.question}-${index}`}
+                className={`progress-dot px-3 ${
+                  isActive
+                    ? 'border-brand-500 bg-brand-50 text-brand-800'
+                    : answered
+                    ? correct
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-rose-200 bg-rose-50 text-rose-700'
+                    : sel
+                    ? 'border-ink-300 bg-white text-ink-700'
+                    : 'border-ink-200 bg-white text-ink-500 hover:border-brand-300'
+                }`}
+                onClick={() => setActiveIndex(index)}
+              >
+                <span className="flex items-center gap-1.5">
+                  Q{index + 1}
+                  {answered &&
+                    (correct ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <XCircle className="h-3.5 w-3.5" />
+                    ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="mb-5 min-h-[3.5rem] text-lg font-medium leading-7 text-ink-900">
+        {activeQuiz?.question || (
+          <span className="text-ink-400">
+            Generate questions to begin. The article on the left is all you need.
+          </span>
+        )}
+      </p>
+
+      <div className="grid gap-3">
+        {OPTION_LABELS.map((label) => {
+          const text = activeQuiz?.options?.[label] || '';
+          const isSelected = selected === label;
+          const isCorrect = showResult && correctLabel === label;
+          const isWrong = showResult && isSelected && !verification.is_correct;
+          let cls = 'option-card';
+          let letterCls = 'letter';
+          if (isCorrect) {
+            cls += ' option-card-correct';
+            letterCls += ' letter-correct';
+          } else if (isWrong) {
+            cls += ' option-card-incorrect';
+            letterCls += ' letter-incorrect';
+          } else if (isSelected) {
+            cls += ' option-card-selected';
+            letterCls += ' letter-selected';
+          }
+          return (
+            <button
+              key={label}
+              className={cls}
+              onClick={() =>
+                !showResult && setSelectedByQuestion({ ...selectedByQuestion, [activeIndex]: label })
+              }
+              disabled={!text || showResult}
+            >
+              <span className={letterCls}>{label}</span>
+              <span className="text-sm font-medium leading-6 text-ink-800">
+                {text || <span className="text-ink-400">No option supplied</span>}
+              </span>
+              {isCorrect && (
+                <CheckCircle2 className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-600" />
+              )}
+              {isWrong && (
+                <XCircle className="absolute right-4 top-1/2 -translate-y-1/2 text-rose-600" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        className="btn-primary mt-5 h-11 w-full"
+        onClick={onVerify}
+        disabled={!selected || loading === 'verify' || !activeQuiz || showResult}
+      >
+        {loading === 'verify' ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" /> Checking…
+          </>
+        ) : (
+          <>
+            <Play className="h-4 w-4" /> Check Answer
+          </>
+        )}
+      </button>
+
+      {verification && (
+        <div
+          className={`mt-4 animate-fade-up rounded-2xl border p-4 ${
+            verification.is_correct
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-rose-200 bg-rose-50 text-rose-900'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <div
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
+                verification.is_correct ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
+              }`}
+            >
+              {verification.is_correct ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : (
+                <XCircle className="h-5 w-5" />
+              )}
+            </div>
+            <div className="flex-1">
+              <strong className="block text-sm font-bold">
+                {verification.is_correct ? 'Correct!' : 'Try again'}
+              </strong>
+              <p className="mt-1 text-sm leading-6">
+                {verification.explanation} Confidence:{' '}
+                <strong>{Math.round(verification.confidence * 100)}%</strong>.
+              </p>
+            </div>
+            {generatedQuestions.length > activeIndex + 1 && (
+              <button
+                className="btn-ghost h-9"
+                onClick={() => setActiveIndex(activeIndex + 1)}
+                title="Next question"
+              >
+                Next <ChevronRight className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HintsPanel({ activeQuiz, revealed, setRevealed }) {
+  if (!activeQuiz) {
+    return (
+      <section className="surface p-6">
+        <div className="mb-1 flex items-center gap-2 text-base font-semibold text-ink-900">
+          <Lightbulb className="h-4 w-4 text-amber-500" /> Hints
+        </div>
+        <p className="text-sm text-ink-500">Generate questions to reveal graduated hints.</p>
+      </section>
+    );
+  }
+  const hints = activeQuiz.hints || [];
+  const allRevealed = revealed >= hints.length;
+  return (
+    <section className="surface p-6">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-base font-semibold text-ink-900">
+          <Lightbulb className="h-4 w-4 text-amber-500" /> Hints
+        </h3>
+        <span className="pill-neutral">
+          {Math.min(revealed, hints.length)} / {hints.length}
+        </span>
+      </div>
+      <div className="grid gap-2">
+        {hints.map((hint, index) => {
+          const open = revealed > index;
+          return (
+            <button
+              key={`${hint}-${index}`}
+              className={`grid grid-cols-[28px_minmax(0,1fr)] items-start gap-3 rounded-xl border p-3 text-left transition ${
+                open
+                  ? 'border-amber-200 bg-amber-50/60 text-ink-800'
+                  : 'border-ink-200 bg-white hover:border-amber-300'
+              }`}
+              onClick={() => setRevealed(Math.max(revealed, index + 1))}
+            >
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-amber-500 text-xs font-bold text-white">
+                {index + 1}
+              </span>
+              <span className="text-sm leading-6">
+                {open ? hint : <span className="text-ink-500">Tap to reveal hint {index + 1}</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {allRevealed && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 p-3 text-sm text-brand-900">
+          <Trophy className="h-4 w-4 text-brand-700" />
+          <span>
+            Answer <strong>{activeQuiz.predicted_correct_option}</strong> &middot;{' '}
+            {activeQuiz.predicted_answer_text}
+          </span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function pct(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return `${Math.round(value * 100)}%`;
+}
+
+function num(value, digits = 2) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  if (typeof value !== 'number') return value;
+  return value.toFixed(digits);
+}
+
+function AnalyticsView({ metrics, onRefresh, onExport, loading }) {
+  const requests = metrics?.session_requests ?? 0;
+  const avgLatency = metrics?.average_latency_ms ?? 0;
+  const modelA = metrics?.model_a?.logistic_regression?.exact_match_answer_accuracy;
+  const stacking = metrics?.model_a?.stacking_classifier?.exact_match_answer_accuracy;
+  const distF1 = metrics?.model_b?.evaluation?.distractors?.f1;
+  const hintR2 = metrics?.model_b?.hint_scorer?.validation_r2;
+  const recent = (metrics?.last_requests || []).slice().reverse();
+
+  return (
+    <section className="grid gap-5">
+      <div className="surface flex flex-col gap-4 p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-ink-900">
+              <BarChart3 className="h-4 w-4 text-brand-600" /> Session analytics
+            </h2>
+            <p className="text-xs text-ink-500">
+              Live model accuracy, latency and recent request log.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="btn-ghost h-9" onClick={onRefresh} disabled={loading === 'metrics'}>
+              {loading === 'metrics' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}{' '}
+              Refresh
+            </button>
+            <button className="btn-primary h-9" onClick={onExport}>
+              <Download className="h-4 w-4" /> Export logs
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="kpi">
+            <span className="kpi-label flex items-center gap-1.5">
+              <Activity className="h-3.5 w-3.5 text-brand-500" /> Requests
+            </span>
+            <span className="kpi-value">{requests}</span>
+            <span className="kpi-sub">since backend started</span>
+          </div>
+          <div className="kpi">
+            <span className="kpi-label flex items-center gap-1.5">
+              <Zap className="h-3.5 w-3.5 text-amber-500" /> Avg latency
+            </span>
+            <span className="kpi-value">{avgLatency} ms</span>
+            <span className="kpi-sub">per generate / verify call</span>
+          </div>
+          <div className="kpi">
+            <span className="kpi-label flex items-center gap-1.5">
+              <GaugeCircle className="h-3.5 w-3.5 text-emerald-500" /> Model A accuracy
+            </span>
+            <span className="kpi-value">{pct(modelA)}</span>
+            <span className="kpi-sub">logistic regression (RACE)</span>
+          </div>
+          <div className="kpi">
+            <span className="kpi-label flex items-center gap-1.5">
+              <Cpu className="h-3.5 w-3.5 text-brand-500" /> Stacking accuracy
+            </span>
+            <span className="kpi-value">{pct(stacking)}</span>
+            <span className="kpi-sub">LR + SVM + NB + RF</span>
+          </div>
+          <div className="kpi">
+            <span className="kpi-label flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-brand-500" /> Distractor F1
+            </span>
+            <span className="kpi-value">{pct(distF1)}</span>
+            <span className="kpi-sub">Model B candidate ranker</span>
+          </div>
+          <div className="kpi">
+            <span className="kpi-label flex items-center gap-1.5">
+              <Brain className="h-3.5 w-3.5 text-brand-500" /> Hint scorer R²
+            </span>
+            <span className="kpi-value">{num(hintR2)}</span>
+            <span className="kpi-sub">Ridge regression</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="surface p-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-ink-900">Recent activity</h3>
+          <span className="pill-neutral">{recent.length} entries</span>
+        </div>
+        {recent.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-ink-200 bg-ink-50/40 p-6 text-center text-sm text-ink-500">
+            No requests yet. Generate or verify a question to populate the log.
+          </p>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-ink-200">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50 text-xs uppercase tracking-wide text-ink-500">
+                <tr>
+                  <th className="px-4 py-2.5 text-left">Endpoint</th>
+                  <th className="px-4 py-2.5 text-right">Latency</th>
+                  <th className="px-4 py-2.5 text-right">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map((row, index) => {
+                  const result =
+                    row.predicted_option ||
+                    (row.question_count !== undefined ? `${row.question_count} q` : '—');
+                  const isVerify = row.endpoint === 'verify';
+                  return (
+                    <tr
+                      key={`${row.endpoint}-${index}`}
+                      className={`border-t border-ink-100 ${
+                        index % 2 === 0 ? 'bg-white' : 'bg-ink-50/40'
+                      }`}
+                    >
+                      <td className="px-4 py-2.5">
+                        <span
+                          className={
+                            isVerify
+                              ? 'pill border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : 'pill-info'
+                          }
+                        >
+                          {row.endpoint}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono text-xs text-ink-600">
+                        {row.latency_ms} ms
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-ink-700">
+                        {result}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function App() {
+  const [tab, setTab] = useState('quiz');
   const [article, setArticle] = useState('');
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState(emptyOptions);
+  const [questionCount, setQuestionCount] = useState(5);
   const [result, setResult] = useState(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [selectedByQuestion, setSelectedByQuestion] = useState({});
   const [verificationByQuestion, setVerificationByQuestion] = useState({});
+  const [revealedHintsByQuestion, setRevealedHintsByQuestion] = useState({});
   const [metrics, setMetrics] = useState(null);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
-  const [revealedHintsByQuestion, setRevealedHintsByQuestion] = useState({});
 
   const generatedQuestions = result?.questions || [];
   const activeQuiz = generatedQuestions[activeIndex] || null;
-  const activeQuestion = activeQuiz?.question || question;
-  const activeOptions = activeQuiz?.options || options;
-  const selected = selectedByQuestion[activeIndex] || '';
-  const verification = verificationByQuestion[activeIndex] || null;
   const revealedHints = revealedHintsByQuestion[activeIndex] || 0;
-  const allHintsUsed = activeQuiz && revealedHints >= activeQuiz.hints.length;
 
   useEffect(() => {
     refreshStatus();
@@ -56,15 +702,23 @@ function App() {
     try {
       setStatus(await api('/health'));
     } catch (err) {
-      setStatus({ status: 'offline', model_a_loaded: false, model_b_loaded: false, error: err.message });
+      setStatus({
+        status: 'offline',
+        model_a_loaded: false,
+        model_b_loaded: false,
+        error: err.message,
+      });
     }
   }
 
   async function refreshMetrics() {
+    setLoading((l) => (l === '' ? 'metrics' : l));
     try {
       setMetrics(await api('/metrics'));
     } catch {
       setMetrics(null);
+    } finally {
+      setLoading((l) => (l === 'metrics' ? '' : l));
     }
   }
 
@@ -100,11 +754,13 @@ function App() {
     setRevealedHintsByQuestion({});
     setActiveIndex(0);
     try {
+      const allFilled = OPTION_LABELS.every((label) => options[label]);
+      const safeCount = Math.max(1, Math.min(10, Number(questionCount) || 5));
       const payload = {
         article,
         question: question || undefined,
-        options: Object.values(options).some(Boolean) ? options : undefined,
-        question_count: 5,
+        options: allFilled && question ? options : undefined,
+        question_count: safeCount,
       };
       setResult(await api('/generate', { method: 'POST', body: JSON.stringify(payload) }));
       refreshMetrics();
@@ -129,7 +785,8 @@ function App() {
   }
 
   async function verifyAnswer() {
-    if (!selected || !activeQuestion) return;
+    const selected = selectedByQuestion[activeIndex];
+    if (!selected || !activeQuiz) return;
     setLoading('verify');
     setError('');
     try {
@@ -137,8 +794,8 @@ function App() {
         method: 'POST',
         body: JSON.stringify({
           article,
-          question: activeQuestion,
-          options: activeOptions,
+          question: activeQuiz.question,
+          options: activeQuiz.options,
           selected_option: selected,
           correct_option: activeQuiz?.predicted_correct_option,
         }),
@@ -156,196 +813,99 @@ function App() {
     window.location.href = `${API_BASE}/logs/export`;
   }
 
-  const modelState = useMemo(() => {
-    if (!status) return 'Checking backend';
-    if (status.status === 'offline') return 'Backend offline';
-    return `Model A ${status.model_a_loaded ? 'loaded' : 'missing'} | Model B ${status.model_b_loaded ? 'loaded' : 'missing'}`;
-  }, [status]);
+  const stats = useMemo(() => {
+    const total = generatedQuestions.length;
+    const verifications = Object.values(verificationByQuestion);
+    const correct = verifications.filter((v) => v?.is_correct).length;
+    return { total, answered: verifications.length, correct };
+  }, [generatedQuestions, verificationByQuestion]);
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-900">
-      <header className="flex flex-col gap-4 bg-slate-800 px-5 py-6 text-slate-50 md:flex-row md:items-center md:justify-between md:px-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-normal">RACE Quiz Generator</h1>
-          <p className="mt-1 text-sm text-slate-300">AI-generated TF-IDF reading comprehension workflow</p>
+    <main className="min-h-screen pb-12">
+      <Header tab={tab} setTab={setTab} status={status} />
+
+      {error && (
+        <div className="mx-auto mt-4 max-w-7xl px-4 md:px-8">
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
         </div>
-        <div className="w-fit rounded-full border border-slate-300 px-3 py-2 text-sm">{modelState}</div>
-      </header>
+      )}
 
-      {error && <div className="mx-3 mt-4 rounded-md bg-orange-50 px-4 py-3 text-orange-900 md:mx-5">{error}</div>}
-
-      <section className="grid gap-5 p-3 md:p-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="grid gap-5 lg:grid-cols-[minmax(320px,0.9fr)_minmax(360px,1.1fr)]">
-          <section className="rounded-lg border border-slate-300 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Article Input</h2>
-              <button
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-slate-200 text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={loadSample}
-                disabled={loading === 'sample'}
-                title="Load random RACE sample"
-              >
-                {loading === 'sample' ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCcw className="h-5 w-5" />}
-              </button>
-            </div>
-            <textarea
-              className="min-h-72 w-full resize-y rounded-md border border-slate-300 px-3 py-2 leading-6 outline-teal-700"
-              value={article}
-              onChange={(event) => setArticle(event.target.value)}
-              placeholder="Paste a reading passage..."
-            />
-            <label className="mt-3 flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-slate-400 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
-              <Upload className="h-5 w-5" />
-              Upload .txt article
-              <input className="sr-only" type="file" accept=".txt,text/plain" onChange={uploadArticle} />
-            </label>
-            <input
-              className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 outline-teal-700"
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Optional existing first question"
-            />
-            <div className="my-3 grid gap-3 sm:grid-cols-2">
-              {Object.keys(emptyOptions).map((label) => (
-                <label key={label} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-2">
-                  <span className="font-semibold">{label}</span>
-                  <input
-                    className="min-w-0 rounded-md border border-slate-300 px-3 py-2 outline-teal-700"
-                    value={options[label]}
-                    onChange={(event) => setOptions({ ...options, [label]: event.target.value })}
-                  />
-                </label>
-              ))}
-            </div>
-            <button
-              className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-teal-700 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={generateQuiz}
-              disabled={loading === 'generate' || article.length < 20}
-            >
-              {loading === 'generate' ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />} Generate 5 Questions
-            </button>
-          </section>
-
-          <section className="rounded-lg border border-slate-300 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Question & Answer</h2>
-              {result?.ai_generated && <span className="rounded-full border border-slate-300 px-3 py-1 text-xs">AI-generated</span>}
+      <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">
+        {tab === 'quiz' ? (
+          <div className="grid gap-5">
+            <div className="grid items-stretch gap-5 lg:grid-cols-2">
+              <ArticlePanel
+                article={article}
+                setArticle={setArticle}
+                question={question}
+                setQuestion={setQuestion}
+                options={options}
+                setOptions={setOptions}
+                questionCount={questionCount}
+                setQuestionCount={setQuestionCount}
+                loading={loading}
+                onLoadSample={loadSample}
+                onUpload={uploadArticle}
+                onGenerate={generateQuiz}
+              />
+              <QuestionPanel
+                generatedQuestions={generatedQuestions}
+                activeIndex={activeIndex}
+                setActiveIndex={setActiveIndex}
+                selectedByQuestion={selectedByQuestion}
+                verificationByQuestion={verificationByQuestion}
+                setSelectedByQuestion={setSelectedByQuestion}
+                onVerify={verifyAnswer}
+                loading={loading}
+              />
             </div>
 
-            {generatedQuestions.length > 0 && (
-              <div className="mb-4 grid grid-cols-5 gap-2">
-                {generatedQuestions.map((item, index) => (
-                  <button
-                    key={`${item.question}-${index}`}
-                    className={`h-10 rounded-md border text-sm font-semibold ${
-                      activeIndex === index ? 'border-teal-700 bg-teal-50 text-teal-900' : 'border-slate-300 bg-white text-slate-700'
-                    }`}
-                    onClick={() => setActiveIndex(index)}
-                  >
-                    Q{index + 1}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <p className="mb-4 min-h-16 text-lg leading-7">{activeQuestion || 'Generate or load questions to begin.'}</p>
-            <div className="mb-4 grid gap-3">
-              {Object.entries(activeOptions).map(([label, text]) => {
-                const isSelected = selected === label;
-                const isPredicted = verification?.predicted_option === label;
-                return (
-                  <button
-                    key={label}
-                    className={`grid min-h-14 grid-cols-[36px_minmax(0,1fr)] items-center gap-3 rounded-md border p-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${
-                      isSelected ? 'border-teal-700 bg-teal-50' : 'border-slate-300 bg-white'
-                    } ${isPredicted ? 'ring-2 ring-amber-500' : ''}`}
-                    onClick={() => setSelectedByQuestion({ ...selectedByQuestion, [activeIndex]: label })}
-                    disabled={!text}
-                  >
-                    <strong className="grid h-8 w-8 place-items-center rounded-full bg-slate-600 text-white">{label}</strong>
-                    <span>{text || 'No option supplied'}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <button
-              className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-teal-700 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={verifyAnswer}
-              disabled={!selected || loading === 'verify' || !activeQuestion}
-            >
-              {loading === 'verify' ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />} Check Answer
-            </button>
-            {verification && (
-              <div className={`mt-4 grid grid-cols-[24px_minmax(0,1fr)] gap-3 rounded-md p-3 ${verification.is_correct ? 'bg-green-50 text-green-900' : 'bg-orange-50 text-orange-900'}`}>
-                {verification.is_correct ? <CheckCircle2 className="h-5 w-5" /> : <XCircle className="h-5 w-5" />}
-                <div>
-                  <strong>{verification.is_correct ? 'Correct' : 'Try again'}</strong>
-                  <p className="mt-1">{verification.explanation} Confidence: {Math.round(verification.confidence * 100)}%.</p>
+            {stats.total > 0 && (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="kpi">
+                  <span className="kpi-label">Score</span>
+                  <span className="kpi-value">
+                    {stats.correct}/{stats.total}
+                  </span>
+                  <span className="kpi-sub">
+                    {stats.total
+                      ? `${Math.round((stats.correct / stats.total) * 100)}% correct`
+                      : '—'}
+                  </span>
+                </div>
+                <div className="kpi">
+                  <span className="kpi-label">Answered</span>
+                  <span className="kpi-value">{stats.answered}</span>
+                  <span className="kpi-sub">of {stats.total}</span>
+                </div>
+                <div className="kpi">
+                  <span className="kpi-label">Remaining</span>
+                  <span className="kpi-value">{stats.total - stats.answered}</span>
+                  <span className="kpi-sub">to verify</span>
                 </div>
               </div>
             )}
-          </section>
-        </div>
 
-        <aside className="grid content-start gap-5">
-          <section className="rounded-lg border border-slate-300 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Hints</h2>
-              <Lightbulb className="h-5 w-5" />
-            </div>
-            {(activeQuiz?.hints || []).map((hint, index) => (
-              <div className="border-t border-slate-200 py-3" key={`${hint}-${index}`}>
-                <button
-                  className="font-semibold text-teal-700"
-                  onClick={() => setRevealedHintsByQuestion({ ...revealedHintsByQuestion, [activeIndex]: Math.max(revealedHints, index + 1) })}
-                >
-                  Hint {index + 1}
-                </button>
-                {revealedHints > index && <p className="mt-2 leading-6 text-slate-600">{hint}</p>}
-              </div>
-            ))}
-            {activeQuiz && allHintsUsed && (
-              <div className="mt-3 rounded-md bg-stone-100 p-3">
-                Answer: {activeQuiz.predicted_correct_option} | {activeQuiz.predicted_answer_text}
-              </div>
-            )}
-            {!activeQuiz && <p className="leading-6 text-slate-600">Generate questions to reveal graduated hints.</p>}
-          </section>
-
-          <section className="rounded-lg border border-slate-300 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Analytics</h2>
-              <BarChart3 className="h-5 w-5" />
-            </div>
-            <dl className="mb-4 grid grid-cols-3 gap-2">
-              <div className="rounded-md border border-slate-200 p-3">
-                <dt className="text-xs text-slate-600">Requests</dt>
-                <dd className="mt-1 font-bold">{metrics?.session_requests ?? 0}</dd>
-              </div>
-              <div className="rounded-md border border-slate-200 p-3">
-                <dt className="text-xs text-slate-600">Avg latency</dt>
-                <dd className="mt-1 font-bold">{metrics?.average_latency_ms ?? 0} ms</dd>
-              </div>
-              <div className="rounded-md border border-slate-200 p-3">
-                <dt className="text-xs text-slate-600">Model A</dt>
-                <dd className="mt-1 font-bold">{Math.round((metrics?.model_a?.logistic_regression?.exact_match_answer_accuracy || 0) * 100)}%</dd>
-              </div>
-            </dl>
-            <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-200 px-4 py-2 text-slate-900" onClick={exportLogs}>
-              <Download className="h-5 w-5" /> Export Logs
-            </button>
-            <div className="mt-3 grid gap-2 text-sm">
-              {(metrics?.last_requests || []).slice().reverse().map((row, index) => (
-                <div className="grid grid-cols-[1fr_80px_40px] gap-2 rounded-md bg-slate-100 p-2" key={`${row.endpoint}-${index}`}>
-                  <span>{row.endpoint}</span>
-                  <span>{row.latency_ms} ms</span>
-                  <span>{row.predicted_option || row.question_count || '-'}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        </aside>
-      </section>
+            <HintsPanel
+              activeQuiz={activeQuiz}
+              revealed={revealedHints}
+              setRevealed={(value) =>
+                setRevealedHintsByQuestion({ ...revealedHintsByQuestion, [activeIndex]: value })
+              }
+            />
+          </div>
+        ) : (
+          <AnalyticsView
+            metrics={metrics}
+            onRefresh={refreshMetrics}
+            onExport={exportLogs}
+            loading={loading}
+          />
+        )}
+      </div>
     </main>
   );
 }
