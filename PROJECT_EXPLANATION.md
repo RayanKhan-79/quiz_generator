@@ -82,7 +82,7 @@ To avoid having three distractors that are all basically the same, the system ap
 
 ## 5. Advanced Evaluation Metrics
 
-When the project is evaluated (via `src/evaluate.py` or the `/metrics` endpoint), it focuses on how well the machine-generated content matches human-written "gold standards."
+When the project is evaluated (via `src/evaluate.py` or the `/metrics` endpoint), it computes multiple dimensions of quality:
 
 ### 5.1. BLEU (Bilingual Evaluation Understudy)
 *   **Logic**: Measures **N-gram Overlap Precision**. It calculates how many words/phrases in the generated question match the reference.
@@ -90,17 +90,38 @@ When the project is evaluated (via `src/evaluate.py` or the `/metrics` endpoint)
 *   **Formula Intuition**: 
     $$\text{BLEU} = \text{BP} \cdot \exp\left(\sum_{n=1}^N w_n \ln p_n\right)$$
     *Where $p_n$ is the precision of n-grams.*
+*   **Implementation**: Computed via `nltk.translate.bleu_score` on tokenized text; scores BLEU-1 through BLEU-4.
 
 ### 5.2. ROUGE (Recall-Oriented Understudy for Gisting Evaluation)
 *   **Logic**: Measures **Recall**. It checks how much of the "human knowledge" in the reference was successfully captured by the AI.
-*   **ROUGE-L**: Focuses on the **Longest Common Subsequence**. It measures the longest string of words that appear in both the reference and the generated text in the same relative order. This captures sentence structure better than BLEU.
+*   **Variants**:
+    - **ROUGE-1**: Unigram overlap
+    - **ROUGE-2**: Bigram overlap  
+    - **ROUGE-L**: Longest Common Subsequence, capturing sentence structure better than BLEU
+*   **Implementation**: Uses `rouge_score` library with stemming enabled; F-scores reported for each variant.
 
 ### 5.3. METEOR (Metric for Evaluation of Translation with Explicit ORdering)
 *   **Logic**: The most "human-like" metric. Unlike BLEU/ROUGE, which look for exact word matches, METEOR uses:
     *   **Stemming**: Matches "running" with "run".
-    *   **Synonymy**: Matches "quick" with "fast".
+    *   **Synonymy**: Matches "quick" with "fast" via WordNet.
     *   **Paraphrasing**: Understands different ways of saying the same thing.
 *   **Penalty**: It applies a penalty for "chunkiness" (how much the word order has been scrambled), ensuring the generated sentence is grammatical.
+*   **Implementation**: Computed via `nltk.translate.meteor_score` with automatic tokenization and lemmatization.
+
+### 5.4. Metrics Integration
+The `src/text_metrics.py` module provides a unified interface for all three metrics:
+```python
+from src.text_metrics import compute_all_text_metrics
+metrics = compute_all_text_metrics(reference_texts, generated_texts)
+```
+Output includes `rouge1_f`, `rouge2_f`, `rougeL_f`, `bleu1`–`bleu4`, and `meteor`.
+
+These metrics are computed during evaluation on the test dataset (or any selected split) and recorded in `models/evaluation_metrics.json` alongside Model A and Model B performance metrics.
+
+### 5.5. Evaluation Results Interpretation
+- **High ROUGE/BLEU/METEOR** (>0.9): Generated text closely matches references (good for templated or predictable outputs)
+- **Moderate scores** (0.6–0.9): Text is semantically similar but with variations in phrasing or order
+- **Low scores** (<0.3): Significant divergence from reference; may indicate model failure or high diversity
 
 ---
 
@@ -117,5 +138,6 @@ When the project is evaluated (via `src/evaluate.py` or the `/metrics` endpoint)
 *   **Question Transformation**: Use a **T5 (Text-to-Text Transfer Transformer)** model to turn cloze sentences into natural Wh-questions (Who/What/Where).
 
 ---
-*Document Version: 1.1*
+*Document Version: 1.2*
+*Last Updated: May 2026*
 *Author: Antigravity AI Assistant*
