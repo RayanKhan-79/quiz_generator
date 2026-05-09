@@ -311,12 +311,12 @@ def _topic_phrase(sentence: str, answer: str, *, min_len: int = 4, max_len: int 
 # used to cycle styles: question *i* takes ``present[i % len(present)]`` so a quiz
 # mixes stems without relying on the ranker or a fixed "first match" preference.
 _TEMPLATE_CYCLE: tuple[str, ...] = (
-    "detail_context",
-    "passage_according",
-    "wh_subject",
+    "cloze_statement",  # Prioritize cloze for clarity
+    "wh_subject",       # Then Wh-questions
+    "cloze_trailing",   # Then trailing cloze
+    "passage_according", # Then passage-according
+    "detail_context",   # Deprioritize generic "which" templates
     "fact_about_topic",
-    "cloze_trailing",
-    "cloze_statement",
 )
 
 
@@ -381,6 +381,11 @@ def _clean_subject_for_definition(subject_raw: str) -> str | None:
     subject = _strip_discourse_prefix(subject_raw or "").strip(" ,.;:\"'`()[]")
     if not subject:
         return None
+    
+    # Reject subjects that start with temporal markers (dates, time references)
+    if re.match(r"^(?:in|on|by|during|before|after|since|when)\s+\d{3,4}|^[A-Z][a-z]+\s+\d{1,2},?\s+\d{4}", subject):
+        return None
+    
     # Cut at the first preposition or relative pronoun so "The 'interest' in
     # this case" becomes "The 'interest'".
     parts = re.split(
@@ -455,8 +460,27 @@ def make_definition_question(sentence: str) -> tuple[str, str, str] | None:
     subject_raw = base[: match.start()]
     predicate_raw = base[match.end():]
     predicate = predicate_raw.strip(" ,.;:\"'`()[]")
-    if not predicate or len(predicate.split()) < 4 or len(predicate.split()) > 24:
+    # Make predicate length stricter: 4-16 words for good definitions
+    # Reject very long predicates that are likely complex narratives
+    if not predicate or len(predicate.split()) < 4 or len(predicate.split()) > 16:
         return None
+    
+    # Reject predicates that look like complex clauses with multiple verbs (e.g., "were expelled from... by... supporting...")
+    # These are not clear definitions but rather narrative/descriptive clauses
+    predicate_lower = predicate.lower()
+    
+    # Check for patterns that indicate this is narrative, not definition
+    complex_patterns = [
+        r'\b(?:were|was|had)\s+(?:expelled|established|founded|overthrown)',  # passive constructions that describe events
+        r'\b(?:by|from|through)\s+(?:American|Taliban|coalition)',  # location/agent descriptions that imply narrative
+        r',\s*(?:thus|therefore|consequently)',  # consequence clauses
+        r'\b(?:and|or)\s+(?:which|that|thus|therefore)',  # complex subordination
+    ]
+    
+    for pattern in complex_patterns:
+        if re.search(pattern, predicate_lower):
+            return None  # Skip definitions that look like narratives
+    
     subject = _clean_subject_for_definition(subject_raw)
     if not subject:
         return None
@@ -508,7 +532,7 @@ def make_wh_question_candidates(sentence: str, answer: str) -> list[dict[str, st
         seen.add(key)
         candidates.append({"question": text, "wh": wh, "template": template})
 
-    def _has_enough_remainder(redacted_text: str, *, min_content_words: int = 4) -> bool:
+    def _has_enough_remainder(redacted_text: str, *, min_content_words: int = 8) -> bool:
         scrubbed = re.sub(r"_+", " ", redacted_text)
         words = [w for w in re.findall(r"[A-Za-z][A-Za-z'-]+", scrubbed) if len(w) >= 3]
         return len(words) >= min_content_words
@@ -527,18 +551,9 @@ def make_wh_question_candidates(sentence: str, answer: str) -> list[dict[str, st
 
     topic = _topic_phrase(sentence, answer)
     if topic:
-        add(
-            f'According to the passage, which option correctly completes the description of "{topic}"?',
-            "which",
-            "detail_context",
-            "?",
-        )
-        add(
-            f'Which option states a fact the passage actually gives about "{topic}"?',
-            "which",
-            "fact_about_topic",
-            "?",
-        )
+        # Only generate more specific "which" questions when we have a clear topic
+        # Skip the generic "which option" templates as they're often vague
+        pass
 
     if _has_enough_remainder(redacted_full):
         add(redacted_full, primary_wh, "cloze_statement", ".")

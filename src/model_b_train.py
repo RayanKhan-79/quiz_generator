@@ -657,6 +657,60 @@ def _train_hint_scorer(
     return model, metrics
 
 
+def _generate_contextual_hint(question: str, answer: str, wh_word: str = None) -> str:
+    """Generate a context-aware first hint based on question type and answer."""
+    import re
+    
+    question_lower = question.lower().strip()
+    answer_lower = (answer or "").lower().strip()
+    
+    # Extract Wh-word if not provided
+    if wh_word is None:
+        for wh in ["who", "what", "where", "when", "why", "how", "which"]:
+            if question_lower.startswith(wh):
+                wh_word = wh
+                break
+        wh_word = wh_word or "what"
+    
+    wh_word = wh_word.lower()
+    
+    # Check if question contains "according to the passage" to adjust hint style
+    is_definition = "according to the passage, what is" in question_lower or 'what does "' in question_lower
+    
+    # Generate contextual hints based on question type
+    if wh_word == "who":
+        if is_definition:
+            return f"Look for the sentence that defines or describes the person/entity. The answer is typically a clause or phrase after 'is' or 'was'."
+        return f"Search for mentions of people or characters. Focus on names or descriptions of individuals discussed in the passage."
+    elif wh_word == "where":
+        if is_definition:
+            return f"Look for geographic references or place names mentioned in relation to the question topic."
+        return f"Scan for location names, place references, or geographic details mentioned in the passage."
+    elif wh_word == "when":
+        if is_definition:
+            return f"Look for dates, time periods, or temporal references that answer the question."
+        return f"Search for dates, years, time periods, or temporal markers in the passage."
+    elif wh_word == "why":
+        if is_definition:
+            return f"Find the reason, cause, or explanation. Look for sentences with explanatory language like 'because', 'due to', 'caused by'."
+        return f"Look for explanatory phrases or causal language explaining why something happened."
+    elif wh_word == "how":
+        if is_definition:
+            return f"Find the method, process, or manner. Look for steps or procedural language in the passage."
+        return f"Search for descriptions of methods, processes, or how something was done."
+    elif wh_word == "which":
+        # Extract quoted topic if present
+        topic_match = re.search(r'"([^"]+)"', question)
+        if topic_match:
+            topic = topic_match.group(1)
+            return f"Focus on sentences that discuss or describe: {topic}"
+        return f"Look for the option that best completes or describes the topic in the question."
+    else:
+        if is_definition:
+            return f"Look for the sentence that provides the definition or explanation. The answer typically follows 'is', 'was', 'means', or similar verbs."
+        return f"Search for information or details that directly answer the question."
+
+
 def generate_hints(
     article: str,
     question: str,
@@ -693,8 +747,12 @@ def generate_hints(
     support = ordered[0]
     secondary = ordered[1] if len(ordered) > 1 else support
     near = support.replace(answer, "____") if answer else support
+    
+    # Generate dynamic context-aware first hint
+    first_hint = _generate_contextual_hint(question, answer)
+    
     return [
-        "Focus on the sentence group that discusses the main subject of the question.",
+        first_hint,
         secondary,
         near,
     ]
