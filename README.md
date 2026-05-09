@@ -40,6 +40,16 @@ python -m src.evaluate
 
 Processed datasets are written to `data/processed/`. Model artifacts are written to `models/model_a/` and `models/model_b/`. The loader supports Parquet `options` values stored as array-like objects and expands them into populated `A/B/C/D` fields.
 
+### Evaluation Metrics
+
+The evaluation pipeline (`python -m src.evaluate`) computes text generation quality metrics:
+
+- **ROUGE**: Measures content overlap (ROUGE-1, ROUGE-2, ROUGE-L) between generated and reference text
+- **BLEU**: Evaluates n-gram precision (BLEU-1 through BLEU-4) with brevity penalty
+- **METEOR**: Provides semantic-aware scoring with stemming, synonym matching, and word order penalties
+
+These metrics are computed against the test dataset and saved to `models/evaluation_metrics.json` alongside Model A (verifier) and Model B (distractor/hint) metrics.
+
 Model B fits a TF-IDF vectorizer plus a **Word2Vec** model (skip-gram) on passage sentences, questions, and options. Distractor ranking and hint sentence selection blend TF-IDF cosine similarity with mean-pooled Word2Vec cosine similarity (weights in `models/model_b/config.json` under `word2vec`). After retraining, `word2vec.kv` is written next to the TF-IDF joblib; if that file is missing, inference falls back to TF-IDF only.
 
 Cloze **question stems** are chosen by ranking passage sentences against candidate answer phrases: for each pair where the answer text appears in the sentence, the score is cosine similarity between TF-IDF vectors of the sentence and of the answer (Model A’s vectorizer when Model A is loaded, otherwise Model B’s), optionally blended with Word2Vec when using Model B’s vectorizer (`generation_blend_weight` in config). Top-scoring unique (sentence, answer) pairs are emitted first; any remaining slots use the previous heuristic sentence ranker.
@@ -70,7 +80,18 @@ Model B writes TF-IDF + Word2Vec artifacts and two trained models:
 
 ### Evaluation
 
-`python -m src.evaluate` writes `models/evaluation_metrics.json` with: Model A exact-match / macro F1 / precision / recall / confusion matrix on the test split, plus the same Model B distractor and hint metrics on a sampled subset.
+`python -m src.evaluate` writes `models/evaluation_metrics.json` with:
+- **Model A**: Exact-match accuracy, macro F1, precision, recall, and confusion matrix on the test split
+- **Model B Distractors**: Precision, Recall, F1, and ranker top-1-not-answer accuracy
+- **Model B Hints**: Precision@3 and top-3 contains-answer rate
+- **Text Generation**: ROUGE (1/2/L), BLEU (1-4), and METEOR scores computed on the test dataset
+
+Customize evaluation with command-line options:
+```powershell
+python -m src.evaluate --split test --limit 100  # Limit to 100 samples
+python -m src.evaluate --split validation         # Evaluate on validation set
+python -m src.evaluate --split train              # Evaluate on training set
+```
 
 ## Tests & EDA
 
@@ -103,3 +124,21 @@ npm run dev
 ```
 
 The UI uses Tailwind utility classes, supports pasted passages and `.txt` article uploads, and expects the backend at `http://localhost:8000` by default. Set `VITE_API_BASE_URL` to override it. The frontend build is pinned to stable Vite 5 packages.
+
+## Text Metrics Module
+
+The `src/text_metrics.py` module provides functions to compute text generation quality metrics:
+
+- `compute_rouge(references, hypotheses)` — ROUGE-1, ROUGE-2, ROUGE-L F-scores
+- `compute_bleu(references, hypotheses)` — BLEU-1 through BLEU-4 scores
+- `compute_meteor(references, hypotheses)` — METEOR score with stemming and synonym matching
+- `compute_all_text_metrics(references, hypotheses)` — Combined computation of all metrics
+
+```python
+from src.text_metrics import compute_all_text_metrics
+
+references = ["What is the capital of France?", "How does photosynthesis work?"]
+hypotheses = ["What is Paris?", "How does plants make food?"]
+metrics = compute_all_text_metrics(references, hypotheses)
+print(metrics)  # {'rouge1_f': ..., 'bleu1': ..., 'meteor': ...}
+```

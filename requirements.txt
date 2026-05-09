@@ -10,3 +10,6 @@ pydantic==2.10.4
 python-multipart==0.0.20
 gensim
 matplotlib
+rouge-score==0.1.2
+nltk>=3.8
+meteor-python==0.5
