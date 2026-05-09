@@ -535,11 +535,28 @@ class QuizEngine:
                 hint_scorer=getattr(self, "hint_scorer", None),
                 hint_scorer_weight=float(cfg.get("hint_scorer_weight", 0.4)),
             )
-        return [
-            "Look for the passage sentence that contains the missing detail.",
-            redact_answer(sentence, answer, count=1),
-            f"The missing phrase has {len(answer.split())} word(s) and appears in that sentence.",
-        ]
+        
+        # For cloze questions with provided sentence, generate dynamic contextual hints
+        from src.model_b_train import _generate_contextual_hint
+        
+        # Determine Wh-word type
+        wh_word = "what"
+        for wh in ["who", "what", "where", "when", "why", "how", "which"]:
+            if question.lower().startswith(wh):
+                wh_word = wh
+                break
+        
+        # Generate contextual first hint
+        first_hint = _generate_contextual_hint(question, answer, wh_word)
+        
+        # Second hint: redacted sentence (with blank)
+        second_hint = redact_answer(sentence, answer, count=1)
+        
+        # Third hint: info about the answer
+        word_count = len(answer.split())
+        third_hint = f"The answer has {word_count} word(s) and appears in the given sentence."
+        
+        return [first_hint, second_hint, third_hint]
 
     def _label_for_answer(self, options: dict[str, str], answer: str) -> str:
         answer_key = answer.strip().lower()
