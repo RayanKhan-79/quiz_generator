@@ -1,0 +1,453 @@
+{
+  "logistic_regression": {
+    "accuracy": 0.7491303458154287,
+    "macro_f1": 0.44672065749376677,
+    "precision": 0.45933014354066987,
+    "recall": 0.019643953345610803,
+    "confusion_matrix": [
+      [
+        14548,
+        113
+      ],
+      [
+        4791,
+        96
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.4175665946724262
+  },
+  "linear_svm_calibrated": {
+    "accuracy": 0.7499488438714959,
+    "macro_f1": 0.42855472404115996,
+    "precision": 0.0,
+    "recall": 0.0,
+    "confusion_matrix": [
+      [
+        14660,
+        1
+      ],
+      [
+        4887,
+        0
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.4038876889848812
+  },
+  "naive_bayes": {
+    "accuracy": 0.750255780642521,
+    "macro_f1": 0.4304541168438366,
+    "precision": 0.6923076923076923,
+    "recall": 0.001841620626151013,
+    "confusion_matrix": [
+      [
+        14657,
+        4
+      ],
+      [
+        4878,
+        9
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.37868970482361414
+  },
+  "random_forest": {
+    "accuracy": 0.5976570493145079,
+    "macro_f1": 0.520604082742705,
+    "precision": 0.281799531066823,
+    "recall": 0.3934929404542664,
+    "confusion_matrix": [
+      [
+        9760,
+        4901
+      ],
+      [
+        2964,
+        1923
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.312455003599712
+  },
+  "ohe_logistic_regression": {
+    "accuracy": 0.7470841006752609,
+    "macro_f1": 0.456805299076658,
+    "precision": 0.42318059299191374,
+    "recall": 0.03212604870063433,
+    "confusion_matrix": [
+      [
+        14447,
+        214
+      ],
+      [
+        4730,
+        157
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.39164866810655147
+  },
+  "soft_voting_ensemble": {
+    "accuracy": 0.7501023122570084,
+    "macro_f1": 0.4313959361902159,
+    "precision": 0.5384615384615384,
+    "recall": 0.002864743196234909,
+    "confusion_matrix": [
+      [
+        14649,
+        12
+      ],
+      [
+        4873,
+        14
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.4089272858171346
+  },
+  "soft_voting_full_ensemble": {
+    "accuracy": 0.7502046245140168,
+    "macro_f1": 0.43083492919833244,
+    "precision": 0.6111111111111112,
+    "recall": 0.0022508696541845715,
+    "confusion_matrix": [
+      [
+        14654,
+        7
+      ],
+      [
+        4876,
+        11
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.39740820734341253
+  },
+  "stacking_classifier": {
+    "accuracy": 0.75,
+    "macro_f1": 0.42857142857142855,
+    "precision": 0.0,
+    "recall": 0.0,
+    "confusion_matrix": [
+      [
+        14661,
+        0
+      ],
+      [
+        4887,
+        0
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.3304535637149028
+  },
+  "blended_ensemble_similarity": {
+    "accuracy": 0.7200736648250461,
+    "macro_f1": 0.5037719428774987,
+    "precision": 0.3333333333333333,
+    "recall": 0.11970534069981584,
+    "confusion_matrix": [
+      [
+        13491,
+        1170
+      ],
+      [
+        4302,
+        585
+      ]
+    ],
+    "exact_match_answer_accuracy": 0.3304535637149028
+  },
+  "direct_multiclass_logistic": {
+    "exact_match_answer_accuracy": 0.2682627378759975,
+    "macro_f1": 0.2583839891227789,
+    "precision": 0.2650501942504122,
+    "recall": 0.26243261383381744,
+    "confusion_matrix": [
+      [
+        154,
+        299,
+        371,
+        243
+      ],
+      [
+        159,
+        365,
+        472,
+        295
+      ],
+      [
+        156,
+        356,
+        484,
+        307
+      ],
+      [
+        152,
+        326,
+        440,
+        308
+      ]
+    ]
+  },
+  "direct_multiclass_svm": {
+    "exact_match_answer_accuracy": 0.2709228565582157,
+    "macro_f1": 0.26678979051393825,
+    "precision": 0.2685516576213899,
+    "recall": 0.26751948667139375,
+    "confusion_matrix": [
+      [
+        214,
+        251,
+        340,
+        262
+      ],
+      [
+        218,
+        364,
+        416,
+        293
+      ],
+      [
+        218,
+        331,
+        434,
+        320
+      ],
+      [
+        235,
+        287,
+        392,
+        312
+      ]
+    ]
+  },
+  "wh_type_naive_bayes": {
+    "accuracy": 0.6705545324329855,
+    "macro_f1": 0.4404922347157213,
+    "precision": 0.5790899724196085,
+    "recall": 0.40655339008649466,
+    "labels": [
+      "how",
+      "other",
+      "what",
+      "when",
+      "where",
+      "which",
+      "who",
+      "why"
+    ],
+    "confusion_matrix": [
+      [
+        47,
+        85,
+        19,
+        9,
+        0,
+        4,
+        1,
+        27
+      ],
+      [
+        21,
+        2007,
+        197,
+        30,
+        2,
+        64,
+        5,
+        40
+      ],
+      [
+        13,
+        414,
+        561,
+        14,
+        1,
+        25,
+        0,
+        40
+      ],
+      [
+        2,
+        117,
+        13,
+        39,
+        0,
+        6,
+        0,
+        20
+      ],
+      [
+        3,
+        39,
+        6,
+        3,
+        15,
+        2,
+        0,
+        7
+      ],
+      [
+        2,
+        72,
+        35,
+        1,
+        0,
+        509,
+        0,
+        4
+      ],
+      [
+        1,
+        89,
+        13,
+        3,
+        0,
+        3,
+        5,
+        2
+      ],
+      [
+        10,
+        99,
+        32,
+        12,
+        0,
+        2,
+        1,
+        94
+      ]
+    ]
+  },
+  "kmeans_full": {
+    "n_clusters": 2,
+    "cluster_counts": {
+      "0": 176803,
+      "1": 174661
+    },
+    "purity": 0.75
+  },
+  "kmeans_subsample_silhouette": {
+    "n_clusters": 2,
+    "purity": 0.7531333333333333,
+    "cluster_counts": {
+      "0": 7469,
+      "1": 7531
+    },
+    "silhouette": 0.16612037138080063
+  },
+  "gaussian_mixture_subsample": {
+    "n_clusters": 2,
+    "purity": 0.7531333333333333,
+    "cluster_counts": {
+      "0": 8568,
+      "1": 6432
+    },
+    "silhouette": -0.010129407345665552
+  },
+  "question_ranker": {
+    "n_samples": 19022,
+    "positive_rate": 0.15771212280517297,
+    "validation_accuracy": 0.9838822704975473,
+    "validation_macro_f1": 0.9686314875982507
+  },
+  "label_propagation_subsample": {
+    "labelled_fraction": 0.15275,
+    "accuracy_on_full_subsample": 0.71675,
+    "macro_f1_on_full_subsample": 0.4760983755928429,
+    "confusion_matrix": [
+      [
+        2789,
+        195
+      ],
+      [
+        938,
+        78
+      ]
+    ]
+  },
+  "option_labels": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "model_comparison": [
+    {
+      "model": "Logistic Regression (TF-IDF)",
+      "family": "supervised",
+      "accuracy": 0.7491303458154287,
+      "macro_f1": 0.44672065749376677,
+      "precision": 0.45933014354066987,
+      "recall": 0.019643953345610803,
+      "exact_match_answer_accuracy": 0.4175665946724262
+    },
+    {
+      "model": "Linear SVM Calibrated (TF-IDF)",
+      "family": "supervised",
+      "accuracy": 0.7499488438714959,
+      "macro_f1": 0.42855472404115996,
+      "precision": 0.0,
+      "recall": 0.0,
+      "exact_match_answer_accuracy": 0.4038876889848812
+    },
+    {
+      "model": "Multinomial Naive Bayes (TF-IDF)",
+      "family": "supervised",
+      "accuracy": 0.750255780642521,
+      "macro_f1": 0.4304541168438366,
+      "precision": 0.6923076923076923,
+      "recall": 0.001841620626151013,
+      "exact_match_answer_accuracy": 0.37868970482361414
+    },
+    {
+      "model": "Random Forest (subsample)",
+      "family": "supervised",
+      "accuracy": 0.5976570493145079,
+      "macro_f1": 0.520604082742705,
+      "precision": 0.281799531066823,
+      "recall": 0.3934929404542664,
+      "exact_match_answer_accuracy": 0.312455003599712
+    },
+    {
+      "model": "Logistic Regression (One-Hot)",
+      "family": "supervised",
+      "accuracy": 0.7470841006752609,
+      "macro_f1": 0.456805299076658,
+      "precision": 0.42318059299191374,
+      "recall": 0.03212604870063433,
+      "exact_match_answer_accuracy": 0.39164866810655147
+    },
+    {
+      "model": "Soft Voting (LR+SVM)",
+      "family": "ensemble",
+      "accuracy": 0.7501023122570084,
+      "macro_f1": 0.4313959361902159,
+      "precision": 0.5384615384615384,
+      "recall": 0.002864743196234909,
+      "exact_match_answer_accuracy": 0.4089272858171346
+    },
+    {
+      "model": "Soft Voting (LR+SVM+NB+RF)",
+      "family": "ensemble",
+      "accuracy": 0.7502046245140168,
+      "macro_f1": 0.43083492919833244,
+      "precision": 0.6111111111111112,
+      "recall": 0.0022508696541845715,
+      "exact_match_answer_accuracy": 0.39740820734341253
+    },
+    {
+      "model": "Stacking Classifier",
+      "family": "ensemble",
+      "accuracy": 0.75,
+      "macro_f1": 0.42857142857142855,
+      "precision": 0.0,
+      "recall": 0.0,
+      "exact_match_answer_accuracy": 0.3304535637149028
+    },
+    {
+      "model": "Blended Ensemble + Similarity",
+      "family": "ensemble",
+      "accuracy": 0.7200736648250461,
+      "macro_f1": 0.5037719428774987,
+      "precision": 0.3333333333333333,
+      "recall": 0.11970534069981584,
+      "exact_match_answer_accuracy": 0.3304535637149028
+    }
+  ]
+}
