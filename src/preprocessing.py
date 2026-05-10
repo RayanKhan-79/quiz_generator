@@ -25,17 +25,27 @@ def clean_text(value: object) -> str:
     return text.strip()
 
 
-def _read_split_file(split: str, raw_dir: Path = RAW_DIR) -> pd.DataFrame:
-    candidates = [raw_dir / f"{split}.parquet", raw_dir / f"{split}.csv"]
-    if split == "validation":
-        candidates.extend([raw_dir / "val.parquet", raw_dir / "val.csv"])
-    for path in candidates:
-        if path.exists():
-            if path.suffix == ".parquet":
-                return pd.read_parquet(path)
-            return pd.read_csv(path)
-    names = ", ".join(path.name for path in candidates)
-    raise FileNotFoundError(f"Could not find {split} data. Expected one of: {names}")
+def _read_full_dataset(raw_dir: Path = RAW_DIR) -> pd.DataFrame:
+    dataset_path = raw_dir / "dataset.csv"
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Could not find dataset.csv at {dataset_path}")
+    return pd.read_csv(dataset_path)
+
+
+def _split_dataset(df: pd.DataFrame, random_state: int = 42) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split dataset into train (80%), validation (10%), and test (10%)."""
+    # First split: 80% train, 20% temp (validation + test)
+    train, temp = _train_test_split(df, test_size=0.2, random_state=random_state)
+    # Second split: Split temp into equal parts (50-50 = 10-10 of original)
+    validation, test = _train_test_split(temp, test_size=0.5, random_state=random_state)
+    return train, validation, test
+
+
+def _train_test_split(df: pd.DataFrame, test_size: float, random_state: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split a dataframe into two parts."""
+    shuffled = df.sample(frac=1, random_state=random_state).reset_index(drop=True)
+    split_idx = int(len(shuffled) * (1 - test_size))
+    return shuffled[:split_idx], shuffled[split_idx:]
 
 
 def _first_existing(df: pd.DataFrame, names: Iterable[str]) -> str | None:
@@ -129,8 +139,9 @@ def expand_options(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def preprocess_split(split: str, raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR) -> tuple[pd.DataFrame, pd.DataFrame]:
-    normalized = normalize_schema(_read_split_file(split, raw_dir))
+def _preprocess_split_df(df: pd.DataFrame, split: str, processed_dir: Path = PROCESSED_DIR) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Process a dataframe split and save it."""
+    normalized = normalize_schema(df)
     expanded = expand_options(normalized)
     processed_dir.mkdir(parents=True, exist_ok=True)
     normalized.to_csv(processed_dir / f"{split}.csv", index=False)
@@ -139,10 +150,15 @@ def preprocess_split(split: str, raw_dir: Path = RAW_DIR, processed_dir: Path = 
 
 
 def preprocess_all(raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR) -> dict[str, dict[str, int]]:
+    # Read the full dataset and perform 80-10-10 split
+    full_dataset = _read_full_dataset(raw_dir)
+    train_df, validation_df, test_df = _split_dataset(full_dataset)
+    
     summary: dict[str, dict[str, int]] = {}
-    for split in ("train", "validation", "test"):
-        normalized, expanded = preprocess_split(split, raw_dir, processed_dir)
-        summary[split] = {"questions": len(normalized), "option_rows": len(expanded), "positives": int(expanded["label"].sum())}
+    for split_name, split_df in [("train", train_df), ("validation", validation_df), ("test", test_df)]:
+        normalized, expanded = _preprocess_split_df(split_df, split_name, processed_dir)
+        summary[split_name] = {"questions": len(normalized), "option_rows": len(expanded), "positives": int(expanded["label"].sum())}
+    
     with (processed_dir / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
     return summary

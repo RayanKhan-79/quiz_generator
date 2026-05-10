@@ -45,20 +45,32 @@ def evaluate_model_a(engine: QuizEngine, df: pd.DataFrame) -> dict[str, object]:
     }
 
 
-def evaluate_text_generation(df: pd.DataFrame) -> dict[str, object]:
-    """Evaluate text generation quality using ROUGE, BLEU, and METEOR scores.
+def evaluate_text_generation_model_a(engine: QuizEngine, df: pd.DataFrame) -> dict[str, object]:
+    """Evaluate Model A's question generation quality using ROUGE, BLEU, and METEOR scores.
     
-    Since we're evaluating against the test set, we compute metrics on the original
-    questions to establish baseline quality measurements.
+    Model A generates questions using its TF-IDF vectorizer and heuristics.
     """
     try:
-        # For demonstration, we use the original questions as both reference and hypothesis
-        # In a real scenario, you'd compare generated questions against originals
-        references = df["question"].tolist()
-        hypotheses = df["question"].tolist()
+        if not engine.model_a_loaded:
+            return {"reason": "Model A artifacts missing"}
+        
+        references = []
+        hypotheses = []
+        
+        for row in df.itertuples(index=False):
+            try:
+                # Generate a question from the article using Model A approach
+                result = engine.generate(row.article, question_count=1)
+                if result.get("questions") and len(result["questions"]) > 0:
+                    generated_question = result["questions"][0]["question"]
+                    hypotheses.append(generated_question)
+                    references.append(row.question)
+            except Exception:
+                # Skip rows where generation fails
+                continue
         
         if not references or not hypotheses:
-            return {"reason": "No text data available"}
+            return {"reason": "Could not generate questions for comparison"}
         
         metrics = compute_all_text_metrics(references, hypotheses)
         
@@ -67,7 +79,44 @@ def evaluate_text_generation(df: pd.DataFrame) -> dict[str, object]:
             **metrics,
         }
     except Exception as e:
-        return {"reason": f"Text metrics evaluation failed: {str(e)}"}
+        return {"reason": f"Model A text generation evaluation failed: {str(e)}"}
+
+
+def evaluate_text_generation_model_b(engine: QuizEngine, df: pd.DataFrame) -> dict[str, object]:
+    """Evaluate Model B's question generation quality using ROUGE, BLEU, and METEOR scores.
+    
+    Model B generates questions using its TF-IDF + Word2Vec vectorizer and heuristics.
+    """
+    try:
+        if not engine.model_b_loaded:
+            return {"reason": "Model B artifacts missing"}
+        
+        references = []
+        hypotheses = []
+        
+        for row in df.itertuples(index=False):
+            try:
+                # Generate a question from the article using Model B approach
+                result = engine.generate(row.article, question_count=1)
+                if result.get("questions") and len(result["questions"]) > 0:
+                    generated_question = result["questions"][0]["question"]
+                    hypotheses.append(generated_question)
+                    references.append(row.question)
+            except Exception:
+                # Skip rows where generation fails
+                continue
+        
+        if not references or not hypotheses:
+            return {"reason": "Could not generate questions for comparison"}
+        
+        metrics = compute_all_text_metrics(references, hypotheses)
+        
+        return {
+            "rows": int(len(references)),
+            **metrics,
+        }
+    except Exception as e:
+        return {"reason": f"Model B text generation evaluation failed: {str(e)}"}
 
 
 def evaluate_split(split: str = "test", limit: int | None = None, distractor_sample: int = 400, hint_sample: int = 400) -> dict[str, object]:
@@ -80,7 +129,8 @@ def evaluate_split(split: str = "test", limit: int | None = None, distractor_sam
 
     engine = QuizEngine()
     model_a_metrics = evaluate_model_a(engine, df)
-    text_metrics = evaluate_text_generation(df)
+    text_metrics_a = evaluate_text_generation_model_a(engine, df)
+    text_metrics_b = evaluate_text_generation_model_b(engine, df)
 
     if engine.model_b_loaded:
         distractor_metrics = _evaluate_distractors(
@@ -105,9 +155,10 @@ def evaluate_split(split: str = "test", limit: int | None = None, distractor_sam
         "split": split,
         "rows": int(len(df)),
         "model_a": model_a_metrics,
+        "model_a_text_generation": text_metrics_a,
+        "model_b_text_generation": text_metrics_b,
         "model_b_distractors": distractor_metrics,
         "model_b_hints": hint_metrics,
-        "text_generation": text_metrics,
     }
     output = ROOT / "models" / "evaluation_metrics.json"
     output.parent.mkdir(parents=True, exist_ok=True)
