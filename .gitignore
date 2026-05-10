@@ -7,6 +7,7 @@ __pycache__/
 venv/
 .venv/
 *.log
+.python-version
 
 data/processed/*.csv
 data/processed/*.parquet
