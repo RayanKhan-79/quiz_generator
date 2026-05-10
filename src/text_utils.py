@@ -75,12 +75,13 @@ def extract_long_phrases(
 
 def extract_candidate_phrases(text: str, max_candidates: int = 80) -> list[str]:
     long_phrases = extract_long_phrases(text, max_phrases=max_candidates // 2)
-    tokens = tokenize_terms(text)
-    counts = Counter(tokens)
-    short_unigrams = [word for word, _ in counts.most_common(max_candidates)]
-    bigrams = [f"{a} {b}" for a, b in zip(tokens, tokens[1:]) if a != b]
-    short_bigrams = [phrase for phrase, _ in Counter(bigrams).most_common(max_candidates // 2)]
-    candidates = long_phrases + short_unigrams + short_bigrams
+    
+    named_entities = []
+    for match in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", text):
+        named_entities.append(match.group(0).strip())
+
+    candidates = long_phrases + named_entities
+    
     seen: set[str] = set()
     unique: list[str] = []
     for candidate in candidates:

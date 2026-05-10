@@ -436,6 +436,7 @@ def rank_distractors(
     answer_key = answer.strip().lower()
     candidates = extract_candidate_phrases(article)
     candidates.extend(option for option in existing_options if option)
+
     unique: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -444,6 +445,22 @@ def rank_distractors(
             continue
         seen.add(key)
         unique.append(candidate.strip())
+
+    # --- NEW: filter candidates to only those that could replace the answer
+    # in the cloze sentence without breaking sentence structure ---
+    answer_word_count = len(answer.strip().split())
+    answer_is_proper = answer.strip()[0].isupper() if answer.strip() else False
+
+    filtered = [
+        c for c in unique
+        if abs(len(c.strip().split()) - answer_word_count) <= 1  # similar length
+        and (not answer_is_proper or c.strip()[0].isupper())     # same capitalisation pattern
+        and c.lower() in article.lower()                          # must be a real phrase from article
+    ]
+    # only use the filtered list if it has enough candidates, otherwise fall back
+    unique = filtered if len(filtered) >= 3 else unique
+    # --- END NEW ---
+
     if not unique:
         return []
 
@@ -487,7 +504,7 @@ def rank_distractors(
     answer_wc = max(1, len(answer.split()))
     candidate_wcs = np.array([max(1, len(candidate.split())) for candidate in unique], dtype=float)
     length_ratio = np.minimum(candidate_wcs, answer_wc) / np.maximum(candidate_wcs, answer_wc)
-    length_weight = 0.55 + 0.45 * length_ratio  # in [0.55, 1.0]
+    length_weight = 0.55 + 0.45 * length_ratio
     scores = scores * length_weight
 
     ranked: list[dict[str, float | str]] = []
@@ -605,53 +622,6 @@ def _train_hint_scorer(
     return model, metrics
 
 
-def _generate_contextual_hint(question: str, answer: str, wh_word: str = None) -> str:
-    import re
-    
-    question_lower = question.lower().strip()
-    answer_lower = (answer or "").lower().strip()
-    
-    if wh_word is None:
-        for wh in ["who", "what", "where", "when", "why", "how", "which"]:
-            if question_lower.startswith(wh):
-                wh_word = wh
-                break
-        wh_word = wh_word or "what"
-    
-    wh_word = wh_word.lower()
-    
-    is_definition = "according to the passage, what is" in question_lower or 'what does "' in question_lower
-    
-    if wh_word == "who":
-        if is_definition:
-            return f"Look for the sentence that defines or describes the person/entity. The answer is typically a clause or phrase after 'is' or 'was'."
-        return f"Search for mentions of people or characters. Focus on names or descriptions of individuals discussed in the passage."
-    elif wh_word == "where":
-        if is_definition:
-            return f"Look for geographic references or place names mentioned in relation to the question topic."
-        return f"Scan for location names, place references, or geographic details mentioned in the passage."
-    elif wh_word == "when":
-        if is_definition:
-            return f"Look for dates, time periods, or temporal references that answer the question."
-        return f"Search for dates, years, time periods, or temporal markers in the passage."
-    elif wh_word == "why":
-        if is_definition:
-            return f"Find the reason, cause, or explanation. Look for sentences with explanatory language like 'because', 'due to', 'caused by'."
-        return f"Look for explanatory phrases or causal language explaining why something happened."
-    elif wh_word == "how":
-        if is_definition:
-            return f"Find the method, process, or manner. Look for steps or procedural language in the passage."
-        return f"Search for descriptions of methods, processes, or how something was done."
-    elif wh_word == "which":
-        topic_match = re.search(r'"([^"]+)"', question)
-        if topic_match:
-            topic = topic_match.group(1)
-            return f"Focus on sentences that discuss or describe: {topic}"
-        return f"Look for the option that best completes or describes the topic in the question."
-    else:
-        if is_definition:
-            return f"Look for the sentence that provides the definition or explanation. The answer typically follows 'is', 'was', 'means', or similar verbs."
-        return f"Search for information or details that directly answer the question."
 
 
 def generate_hints(
@@ -659,26 +629,28 @@ def generate_hints(
     question: str,
     answer: str,
     vectorizer: TfidfVectorizer,
-    w2v: "KeyedVectors | None" = None,
+    w2v=None,
     hint_w2v_blend: float = 0.42,
-    hint_scorer: Ridge | None = None,
+    hint_scorer=None,
     hint_scorer_weight: float = 0.4,
 ) -> list[str]:
-    sentences = split_sentences(article)
+    sentences = [s for s in split_sentences(article) if len(s.strip()) > 20]
     if not sentences:
         return [
-            "Review the passage for the part related to the question.",
+            "Review the passage carefully.",
             "Look for wording that overlaps with the question.",
-            "The answer is supported directly by the passage.",
+            "The answer appears directly in the passage.",
         ]
+
+    # Score sentences by relevance to the question
     sentence_x = vectorizer.transform(sentences)
     question_x = vectorizer.transform([question])
-    scores_tfidf = cosine_similarity(sentence_x, question_x).ravel()
+    scores = cosine_similarity(sentence_x, question_x).ravel()
+
     if w2v is not None:
         scores_w2v = _w2v_cosine_to_ref(sentences, question, w2v)
-        scores = _blend_tfidf_w2v(scores_tfidf, scores_w2v, hint_w2v_blend)
-    else:
-        scores = scores_tfidf
+        scores = _blend_tfidf_w2v(scores, scores_w2v, hint_w2v_blend)
+
     if hint_scorer is not None:
         feats = _hint_features(question, answer, sentences)
         try:
@@ -686,19 +658,27 @@ def generate_hints(
             scores = (1.0 - hint_scorer_weight) * _normalize01(scores) + hint_scorer_weight * _normalize01(ml_scores)
         except Exception:
             pass
-    ordered = [sentences[int(index)] for index in np.argsort(scores)[::-1]]
-    support = ordered[0]
-    secondary = ordered[1] if len(ordered) > 1 else support
-    near = support.replace(answer, "____") if answer else support
-    
-    first_hint = _generate_contextual_hint(question, answer)
-    
-    return [
-        first_hint,
-        secondary,
-        near,
-    ]
 
+    ordered = [sentences[int(i)] for i in np.argsort(scores)[::-1]]
+    support = ordered[0]  # most relevant sentence
+    secondary = ordered[1] if len(ordered) > 1 else ordered[0]  # second most relevant
+
+    # Hint 1: a related sentence that does NOT contain the answer — general context
+    hint1 = next(
+        (s for s in ordered if answer.lower() not in s.lower()),
+        secondary  # fallback if all sentences contain the answer
+    )
+
+    # Hint 2: the most relevant sentence with the answer partially obscured
+    # keep first word of answer as a starting clue
+    first_word = answer.split()[0] if answer.split() else ""
+    hint2 = support.replace(answer, f"{first_word}...") if answer in support else support
+
+    # Hint 3: the sentence with answer fully blanked + word count
+    word_count = len(answer.split())
+    hint3 = support.replace(answer, "____") + f" ({word_count} words)"
+
+    return [hint1, hint2, hint3]
 
 def _set_overlap_metrics(predicted: list[str], gold: list[str]) -> tuple[float, float, float]:
     pred_set = {p.strip().lower() for p in predicted if p}

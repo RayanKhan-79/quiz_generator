@@ -38,7 +38,6 @@ async function api(path, options = {}) {
       const body = await response.json();
       detail = body.detail || detail;
     } catch {
-      // keep status text
     }
     throw new Error(detail);
   }
@@ -186,7 +185,6 @@ function ArticlePanel({
           <label className="text-xs font-semibold uppercase tracking-wide text-ink-600">
             Number of questions
           </label>
-          <span className="text-xs text-ink-500">choose 1–10</span>
         </div>
         <div className="grid grid-cols-4 gap-2">
           {QUESTION_COUNT_OPTIONS.map((count) => {
@@ -506,15 +504,6 @@ function HintsPanel({ activeQuiz, revealed, setRevealed }) {
           );
         })}
       </div>
-      {allRevealed && (
-        <div className="mt-3 flex items-center gap-2 rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 p-3 text-sm text-brand-900">
-          <Trophy className="h-4 w-4 text-brand-700" />
-          <span>
-            Answer <strong>{activeQuiz.predicted_correct_option}</strong> &middot;{' '}
-            {activeQuiz.predicted_answer_text}
-          </span>
-        </div>
-      )}
     </section>
   );
 }

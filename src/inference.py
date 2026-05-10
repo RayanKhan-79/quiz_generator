@@ -516,36 +516,55 @@ class QuizEngine:
         return " ".join(useful[:2] or words[:2]) or "the passage"
 
     def _hints_for_spec(self, article: str, question: str, answer: str, sentence: str) -> list[str]:
-        if not sentence:
-            cfg = getattr(self, "model_b_config", {}) or {}
-            w2v_section = cfg.get("word2vec") or {}
-            return generate_hints(
-                article,
-                question,
-                answer,
-                self.vectorizer_b,
-                w2v=getattr(self, "w2v_b", None),
-                hint_w2v_blend=float(w2v_section.get("hint_blend_weight", 0.42)),
-                hint_scorer=getattr(self, "hint_scorer", None),
-                hint_scorer_weight=float(cfg.get("hint_scorer_weight", 0.4)),
-            )
-        
-        from src.model_b_train import _generate_contextual_hint
-        
-        wh_word = "what"
-        for wh in ["who", "what", "where", "when", "why", "how", "which"]:
-            if question.lower().startswith(wh):
-                wh_word = wh
-                break
-        
-        first_hint = _generate_contextual_hint(question, answer, wh_word)
-        
-        second_hint = redact_answer(sentence, answer, count=1)
-        
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        sentences = [s for s in split_sentences(article) if len(s.strip()) > 20]
+        if not sentences:
+            sentences = [sentence] if sentence else [article[:200]]
+
+        sentence_x = self.vectorizer_b.transform(sentences)
+        question_x = self.vectorizer_b.transform([question])
+        scores = cosine_similarity(sentence_x, question_x).ravel()
+        ordered = [sentences[int(i)] for i in scores.argsort()[::-1]]
+
+        # Find the sentence that actually contains the answer — not just the top scored one
+        answer_lower = answer.lower()
+        support = next(
+            (s for s in ordered if answer_lower in s.lower()),
+            ordered[0]  # fallback to top scored if none contain answer
+        )
+
+        # Hint 1: relevant sentence that does NOT contain the answer
+        hint1 = next(
+            (s for s in ordered if answer_lower not in s.lower()),
+            ordered[1] if len(ordered) > 1 else support
+        )
+
+        # Hint 2: the answer sentence with only the first word shown
+        first_word = answer.split()[0] if answer.split() else ""
+        hint2 = re.sub(re.escape(answer), f"{first_word}...", support, flags=re.IGNORECASE)
+
+        # Hint 3: fully blanked with word count
         word_count = len(answer.split())
-        third_hint = f"The answer has {word_count} word(s) and appears in the given sentence."
-        
-        return [first_hint, second_hint, third_hint]
+        hint3 = re.sub(re.escape(answer), "____", support, flags=re.IGNORECASE) + f" ({word_count} words)"
+
+        def _scrub(hint: str) -> str:
+            if answer_lower in hint.lower():
+                return "Sorry, no more hints! At this point I can only tell you the answer."
+            return hint
+
+        hint1 = _scrub(hint1)
+        hint2 = _scrub(hint2)
+
+        # If hint2 is same as hint1, replace it
+        if hint2 == hint1 or hint2 == "Sorry, no more hints! At this point I can only tell you the answer.":
+            hint2 = "Sorry, no more hints! At this point I can only tell you the answer."
+
+        # If hint3 is same as hint2 or hint1, replace it
+        if hint3 == hint2 or hint3 == hint1:
+            hint3 = "Sorry, no more hints! At this point I can only tell you the answer."
+
+        return [hint1, hint2, hint3]
 
     def _label_for_answer(self, options: dict[str, str], answer: str) -> str:
         answer_key = answer.strip().lower()
