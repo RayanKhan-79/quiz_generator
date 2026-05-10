@@ -17,3 +17,4 @@ ui/dist/
 ui/.vite/
 *.local
 data/
+models/
