@@ -7,7 +7,6 @@ import nltk
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.translate.meteor_score import meteor_score
 
-# Download required NLTK data
 try:
     nltk.data.find("tokenizers/punkt")
 except LookupError:
@@ -31,16 +30,6 @@ except ImportError:
 
 
 def compute_rouge(references: list[str], hypotheses: list[str]) -> dict[str, float]:
-    """
-    Compute ROUGE scores (ROUGE-1, ROUGE-2, ROUGE-L).
-    
-    Args:
-        references: Ground truth texts
-        hypotheses: Generated texts
-        
-    Returns:
-        Dictionary with average ROUGE scores
-    """
     if not rouge_scorer:
         return {"error": "rouge_score not available"}
     
@@ -64,25 +53,12 @@ def compute_rouge(references: list[str], hypotheses: list[str]) -> dict[str, flo
 
 
 def compute_bleu(references: list[list[str]], hypotheses: list[str], max_n: int = 4) -> dict[str, float]:
-    """
-    Compute BLEU scores (BLEU-1 through BLEU-4).
-    
-    Args:
-        references: List of reference texts (each can have multiple valid references)
-        hypotheses: Generated texts
-        max_n: Maximum n-gram to compute (1-4)
-        
-    Returns:
-        Dictionary with average BLEU scores
-    """
     bleu_scores = {f"bleu{i}": [] for i in range(1, max_n + 1)}
     
     for ref_list, hyp in zip(references, hypotheses):
-        # Tokenize
         ref_tokens = [nltk.word_tokenize(ref.lower()) for ref in (ref_list if isinstance(ref_list, list) else [ref_list])]
         hyp_tokens = nltk.word_tokenize(hyp.lower())
         
-        # Compute BLEU for different n-grams
         for n in range(1, max_n + 1):
             weights = tuple([1.0 / n] * n)
             score = sentence_bleu(ref_tokens, hyp_tokens, weights=weights)
@@ -92,16 +68,6 @@ def compute_bleu(references: list[list[str]], hypotheses: list[str], max_n: int 
 
 
 def compute_meteor(references: list[str], hypotheses: list[str]) -> dict[str, float]:
-    """
-    Compute METEOR scores.
-    
-    Args:
-        references: Ground truth texts
-        hypotheses: Generated texts
-        
-    Returns:
-        Dictionary with average METEOR score
-    """
     meteor_scores = []
     
     for ref, hyp in zip(references, hypotheses):
@@ -119,25 +85,12 @@ def compute_all_text_metrics(
     references: list[str],
     hypotheses: list[str],
 ) -> dict[str, Any]:
-    """
-    Compute all text generation metrics.
-    
-    Args:
-        references: Ground truth texts
-        hypotheses: Generated texts
-        
-    Returns:
-        Dictionary with all metric scores
-    """
     metrics = {}
     
-    # ROUGE
     metrics.update(compute_rouge(references, hypotheses))
     
-    # BLEU
     metrics.update(compute_bleu(references, hypotheses))
     
-    # METEOR
     metrics.update(compute_meteor(references, hypotheses))
     
     return metrics

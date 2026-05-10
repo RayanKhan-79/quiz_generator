@@ -33,12 +33,6 @@ MODEL_DIR = ROOT / "models" / "model_b"
 W2V_KV_NAME = "word2vec.kv"
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'-]{1,}")
 
-
-# ---------------------------------------------------------------------------
-# Word2Vec helpers
-# ---------------------------------------------------------------------------
-
-
 def _w2v_tokens(text: str) -> list[str]:
     return [m.group(0).lower() for m in _TOKEN_RE.finditer(text or "")]
 
@@ -138,10 +132,6 @@ def _load_questions(split: str) -> pd.DataFrame:
     return pd.read_csv(path).fillna("")
 
 
-# ---------------------------------------------------------------------------
-# Character-level overlap feature
-# ---------------------------------------------------------------------------
-
 
 def char_level_match(a: str, b: str) -> float:
     """Longest matching substring length divided by max length, in [0, 1]."""
@@ -153,10 +143,6 @@ def char_level_match(a: str, b: str) -> float:
     match = matcher.find_longest_match(0, len(a), 0, len(b))
     return float(match.size) / float(max(len(a), len(b)))
 
-
-# ---------------------------------------------------------------------------
-# Distractor candidate features
-# ---------------------------------------------------------------------------
 
 
 def _content_tokens(text: str) -> set[str]:
@@ -224,10 +210,6 @@ def compute_distractor_features(
     return rows
 
 
-# ---------------------------------------------------------------------------
-# Frequency-Based Substitution distractor alternative
-# ---------------------------------------------------------------------------
-
 
 def frequency_substitution_distractors(
     article: str,
@@ -235,7 +217,6 @@ def frequency_substitution_distractors(
     existing_options: list[str] | None = None,
     top_n: int = 3,
 ) -> list[dict[str, float | str]]:
-    """Pick distractors by selecting article phrases with similar frequency to the answer."""
     answer_key = (answer or "").strip().lower()
     excluded = {answer_key}
     for opt in existing_options or []:
@@ -260,10 +241,6 @@ def frequency_substitution_distractors(
         out.append({"text": text, "score": float(1.0 / (1.0 + closeness))})
     return out
 
-
-# ---------------------------------------------------------------------------
-# ML-trained distractor ranker
-# ---------------------------------------------------------------------------
 
 
 def _build_distractor_training_set(
@@ -360,15 +337,7 @@ def _train_distractor_ranker(
     return classifier, metrics
 
 
-# ---------------------------------------------------------------------------
-# Generation candidate sentence ranker (kept from earlier work)
-# ---------------------------------------------------------------------------
-
-
 def _leaves_enough_remainder(answer: str, sentences: list[str], min_words: int = 4) -> bool:
-    """True if at least one sentence has >= *min_words* content words remaining
-    after the answer span is removed.  Prevents cloze stems like ``____.``
-    when the candidate answer dominates a short sentence."""
     answer_lower = answer.lower()
     pattern = re.compile(re.escape(answer), flags=re.IGNORECASE)
     for sentence in sentences:
@@ -382,14 +351,6 @@ def _leaves_enough_remainder(answer: str, sentences: list[str], min_words: int =
 
 
 def _generation_answer_candidates(article: str, sentences: list[str], max_phrases: int = 100) -> list[str]:
-    """Build candidate answer spans for cloze / Wh question generation.
-
-    Long noun phrases are great *distractors* but make poor cloze *answers*
-    (the redacted sentence collapses to "In ____?").  So we cap the
-    candidate length at 8 words and require >= 4 content words to remain in
-    the sentence after redaction.  The definition pathway in ``inference``
-    handles longer predicate clauses separately.
-    """
     seen: set[str] = set()
     out: list[str] = []
     for phrase in extract_candidate_phrases(article, max_candidates=max_phrases):
@@ -459,11 +420,6 @@ def rank_generation_sentence_answer_pairs(
     return sorted(best_per_sentence.values(), key=lambda x: -x[0])
 
 
-# ---------------------------------------------------------------------------
-# Public ranker used by inference
-# ---------------------------------------------------------------------------
-
-
 def rank_distractors(
     article: str,
     question: str,
@@ -528,8 +484,6 @@ def rank_distractors(
     else:
         scores = base_scores
 
-    # Length-shape matching: a long phrase answer should attract long-phrase
-    # distractors and a single-word answer should attract single-word ones.
     answer_wc = max(1, len(answer.split()))
     candidate_wcs = np.array([max(1, len(candidate.split())) for candidate in unique], dtype=float)
     length_ratio = np.minimum(candidate_wcs, answer_wc) / np.maximum(candidate_wcs, answer_wc)
@@ -562,12 +516,6 @@ def rank_distractors(
         if len(ranked) == 3:
             break
     return ranked
-
-
-# ---------------------------------------------------------------------------
-# Hint generation: extractive (existing) + ML-scored (new)
-# ---------------------------------------------------------------------------
-
 
 HINT_FEATURE_NAMES = (
     "keyword_overlap",
@@ -658,13 +606,11 @@ def _train_hint_scorer(
 
 
 def _generate_contextual_hint(question: str, answer: str, wh_word: str = None) -> str:
-    """Generate a context-aware first hint based on question type and answer."""
     import re
     
     question_lower = question.lower().strip()
     answer_lower = (answer or "").lower().strip()
     
-    # Extract Wh-word if not provided
     if wh_word is None:
         for wh in ["who", "what", "where", "when", "why", "how", "which"]:
             if question_lower.startswith(wh):
@@ -674,10 +620,8 @@ def _generate_contextual_hint(question: str, answer: str, wh_word: str = None) -
     
     wh_word = wh_word.lower()
     
-    # Check if question contains "according to the passage" to adjust hint style
     is_definition = "according to the passage, what is" in question_lower or 'what does "' in question_lower
     
-    # Generate contextual hints based on question type
     if wh_word == "who":
         if is_definition:
             return f"Look for the sentence that defines or describes the person/entity. The answer is typically a clause or phrase after 'is' or 'was'."
@@ -699,7 +643,6 @@ def _generate_contextual_hint(question: str, answer: str, wh_word: str = None) -
             return f"Find the method, process, or manner. Look for steps or procedural language in the passage."
         return f"Search for descriptions of methods, processes, or how something was done."
     elif wh_word == "which":
-        # Extract quoted topic if present
         topic_match = re.search(r'"([^"]+)"', question)
         if topic_match:
             topic = topic_match.group(1)
@@ -748,7 +691,6 @@ def generate_hints(
     secondary = ordered[1] if len(ordered) > 1 else support
     near = support.replace(answer, "____") if answer else support
     
-    # Generate dynamic context-aware first hint
     first_hint = _generate_contextual_hint(question, answer)
     
     return [
@@ -756,11 +698,6 @@ def generate_hints(
         secondary,
         near,
     ]
-
-
-# ---------------------------------------------------------------------------
-# Distractor + Hint evaluation on the validation split
-# ---------------------------------------------------------------------------
 
 
 def _set_overlap_metrics(predicted: list[str], gold: list[str]) -> tuple[float, float, float]:
@@ -887,11 +824,6 @@ def _evaluate_hints(
         f"precision_at_{top_k}": float(np.mean(precisions)) if precisions else 0.0,
         f"top_{top_k}_contains_answer_rate": float(np.mean(contains_answer_topk)) if contains_answer_topk else 0.0,
     }
-
-
-# ---------------------------------------------------------------------------
-# Train entrypoint
-# ---------------------------------------------------------------------------
 
 
 def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:

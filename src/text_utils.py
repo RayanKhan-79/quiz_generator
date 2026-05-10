@@ -33,11 +33,6 @@ _DETERMINER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Strong boundaries that end a noun-phrase span.  We deliberately keep
-# "and"/"or" *inside* the phrase when they connect noun-level constituents
-# (so "the bread and butter" stays whole) but treat them as clause
-# boundaries when preceded by a comma ("a market before a competitor, or
-# unintentional, like code...").
 _PHRASE_BOUNDARY_RE = re.compile(
     r"[.;]|—|–|\(|\)|"
     r",\s+(?:and|or|but|so)\s+|"
@@ -53,10 +48,6 @@ def extract_long_phrases(
     max_words: int = 18,
     max_phrases: int = 80,
 ) -> list[str]:
-    """Extract determiner-headed noun-phrase-like spans of *min_words* to
-    *max_words* words.  These read more like the multi-word distractor
-    options that appear in real reading-comprehension MCQs (e.g.
-    "the extra time and effort required to maintain or fix the code")."""
     if not text:
         return []
     sentences = split_sentences(text) or [text]

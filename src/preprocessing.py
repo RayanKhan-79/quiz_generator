@@ -33,16 +33,12 @@ def _read_full_dataset(raw_dir: Path = RAW_DIR) -> pd.DataFrame:
 
 
 def _split_dataset(df: pd.DataFrame, random_state: int = 42) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Split dataset into train (80%), validation (10%), and test (10%)."""
-    # First split: 80% train, 20% temp (validation + test)
     train, temp = _train_test_split(df, test_size=0.2, random_state=random_state)
-    # Second split: Split temp into equal parts (50-50 = 10-10 of original)
     validation, test = _train_test_split(temp, test_size=0.5, random_state=random_state)
     return train, validation, test
 
 
 def _train_test_split(df: pd.DataFrame, test_size: float, random_state: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split a dataframe into two parts."""
     shuffled = df.sample(frac=1, random_state=random_state).reset_index(drop=True)
     split_idx = int(len(shuffled) * (1 - test_size))
     return shuffled[:split_idx], shuffled[split_idx:]
@@ -140,7 +136,6 @@ def expand_options(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _preprocess_split_df(df: pd.DataFrame, split: str, processed_dir: Path = PROCESSED_DIR) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Process a dataframe split and save it."""
     normalized = normalize_schema(df)
     expanded = expand_options(normalized)
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +145,6 @@ def _preprocess_split_df(df: pd.DataFrame, split: str, processed_dir: Path = PRO
 
 
 def preprocess_all(raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR) -> dict[str, dict[str, int]]:
-    # Read the full dataset and perform 80-10-10 split
     full_dataset = _read_full_dataset(raw_dir)
     train_df, validation_df, test_df = _split_dataset(full_dataset)
     

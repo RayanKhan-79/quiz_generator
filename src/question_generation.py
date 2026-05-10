@@ -1,17 +1,3 @@
-"""Wh-template question generation + a trainable quality ranker.
-
-The pipeline implements §4.2.3 of the project document:
-  Step 1 — extract candidate (sentence, answer) pairs (handled in
-          ``src/model_b_train.rank_generation_sentence_answer_pairs``).
-  Step 2 — apply Wh-word templates (Who/What/Where/When/Why/How) to convert
-          each candidate sentence into one or more natural questions.
-  Step 3 — rank the templated questions with a trained classifier that
-          discriminates real RACE questions from machine-templated questions.
-
-The ranker is a small Logistic Regression / Random Forest model wrapped
-around a CountVectorizer (One-Hot Encoding) plus light hand-crafted
-lexical features.  The artifacts are saved next to Model A.
-"""
 from __future__ import annotations
 
 import re
@@ -24,9 +10,6 @@ from sklearn.feature_extraction.text import CountVectorizer
 
 WH_WORDS = ("who", "what", "where", "when", "why", "how", "which")
 _PERSON_HINT_RE = re.compile(r"\b(?:Mr|Mrs|Ms|Dr|Prof|President|King|Queen|Lord|Lady)\b")
-# Matches proper-noun phrases such as "Marie Curie", "Mrs. Baker's sister",
-# "New York", "St. Petersburg".  The first token must start with a capital
-# letter; following tokens may be lowercase (sister, of, the, etc.).
 _PROPER_NOUN_RE = re.compile(r"^[A-Z][\w'.\-]*(?:\s+[\w'.\-]+)*$")
 _NUMERIC_RE = re.compile(r"^\d+(?:[.,]\d+)?$")
 _YEAR_RE = re.compile(r"^(?:1\d{3}|20\d{2})$")
@@ -50,7 +33,6 @@ _NUMBER_HINTS = {"percent", "%", "people", "students", "dollars", "hours", "minu
 
 
 def _classify_answer(answer: str, sentence_lower: str) -> str:
-    """Return a Wh-word that fits the type of *answer* in *sentence_lower*."""
     answer = (answer or "").strip()
     lower = answer.lower()
     if not answer:
@@ -105,8 +87,6 @@ _SUBJECT_BOUNDARY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Discourse / connective phrases that often appear before the real subject.
-# We strip these from the front of the candidate subject before validating it.
 _DISCOURSE_LEADERS: tuple[str, ...] = (
     "for example",
     "for instance",
@@ -165,7 +145,6 @@ _DISCOURSE_LEADERS: tuple[str, ...] = (
     "tomorrow",
 )
 
-# Subjects that are pronouns / generic references make poor "topic" stems.
 _GENERIC_SUBJECTS: frozenset[str] = frozenset(
     {
         "he",
@@ -241,7 +220,6 @@ _TOPIC_FUNCTION_WORDS: frozenset[str] = frozenset(
 
 
 def _strip_discourse_prefix(text: str) -> str:
-    """Remove a leading discourse marker (and its trailing comma) from *text*."""
     cleaned = text.strip()
     cleaned_lower = cleaned.lower()
     for marker in sorted(_DISCOURSE_LEADERS, key=len, reverse=True):
@@ -254,12 +232,6 @@ def _strip_discourse_prefix(text: str) -> str:
 
 
 def _topic_phrase(sentence: str, answer: str, *, min_len: int = 4, max_len: int = 60) -> str | None:
-    """Return a short subject-noun phrase suitable for quoting in non-cloze stems.
-
-    Returns ``None`` when no clean topic exists, so the caller skips
-    ``detail_context`` / ``fact_about_topic`` and falls back to cloze or Wh
-    forms instead of producing awkward stems like "...about 'For example'".
-    """
     if not sentence:
         return None
     leading_ws = re.match(r"^\W+", sentence)
@@ -307,9 +279,6 @@ def _topic_phrase(sentence: str, answer: str, *, min_len: int = 4, max_len: int 
     return subject
 
 
-# Order used when filtering which templates exist for this (sentence, answer); also
-# used to cycle styles: question *i* takes ``present[i % len(present)]`` so a quiz
-# mixes stems without relying on the ranker or a fixed "first match" preference.
 _TEMPLATE_CYCLE: tuple[str, ...] = (
     "cloze_statement",  # Prioritize cloze for clarity
     "wh_subject",       # Then Wh-questions
@@ -327,7 +296,6 @@ def select_question_candidate(
     vectorizer: CountVectorizer | None,
     classifier,
 ) -> dict[str, str]:
-    """Pick one candidate, cycling through *available* template types by *style_index*."""
     if not candidates:
         raise ValueError("candidates must be non-empty")
     by_template: dict[str, list[dict[str, str]]] = {}
@@ -360,10 +328,6 @@ _COPULA_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Phrases where the sentence introduces a *named term* on the right hand side:
-# "X is known as Y", "X is often called Y" -> the defined term is Y, the
-# description is X.  We flip the roles in this case so the question becomes
-# "According to the passage, what is 'Y'?" with the description as the answer.
 _NAMED_TERM_RE = re.compile(
     r"\b(?:is|are|was|were)\s+(?:often\s+)?(?:also\s+)?"
     r"(?:known\s+as|called|named|referred\s+to\s+as|defined\s+as|termed)\b",
@@ -375,19 +339,13 @@ _DEMONSTRATIVE_LEADS: frozenset[str] = frozenset({"this", "that", "these", "thos
 
 
 def _clean_subject_for_definition(subject_raw: str) -> str | None:
-    """Return a tight subject phrase to use inside a definition stem, or None
-    if the subject is too generic / demonstrative / too long / too short.
-    """
     subject = _strip_discourse_prefix(subject_raw or "").strip(" ,.;:\"'`()[]")
     if not subject:
         return None
     
-    # Reject subjects that start with temporal markers (dates, time references)
     if re.match(r"^(?:in|on|by|during|before|after|since|when)\s+\d{3,4}|^[A-Z][a-z]+\s+\d{1,2},?\s+\d{4}", subject):
         return None
     
-    # Cut at the first preposition or relative pronoun so "The 'interest' in
-    # this case" becomes "The 'interest'".
     parts = re.split(
         r"\s+(?:in|on|at|of|to|for|with|from|by|about|that|which|who|whose)\s+",
         subject,
@@ -401,7 +359,6 @@ def _clean_subject_for_definition(subject_raw: str) -> str | None:
         return None
     first = words[0].lower()
     if first in _DEMONSTRATIVE_LEADS:
-        # "This trade-off", "That state" — anaphoric, refers to prior context.
         return None
     if subject.lower() in _GENERIC_SUBJECTS or subject.lower() in _DISCOURSE_LEADERS:
         return None
@@ -418,16 +375,6 @@ def _clean_subject_for_definition(subject_raw: str) -> str | None:
 
 
 def make_definition_question(sentence: str) -> tuple[str, str, str] | None:
-    """If *sentence* is a copular definition like ``X is Y``, return
-    ``(question_stem, answer_clause, original_sentence)``. Otherwise None.
-
-    Examples
-    --------
-    >>> make_definition_question("The 'interest' is the extra time required to fix the code.")
-    ('According to the passage, what does "The \\'interest\\'" refer to?',
-     'the extra time required to fix the code',
-     "The 'interest' is the extra time required to fix the code.")
-    """
     if not sentence:
         return None
     sentence_clean = sentence.strip()
@@ -435,18 +382,15 @@ def make_definition_question(sentence: str) -> tuple[str, str, str] | None:
         return None
     base = sentence_clean.rstrip(".!?")
 
-    # Prefer the "X is known as / called Y" pattern: the defined term is Y.
     named = _NAMED_TERM_RE.search(base)
     if named:
         description_raw = base[: named.start()]
         term_raw = base[named.end():]
         term = term_raw.strip(" ,.;:\"'`()[]")
-        # The named term is usually short (1–6 words); reject longer matches.
         if term and 1 <= len(term.split()) <= 6:
             description = description_raw.strip(" ,.;:\"'`()[]")
             description = _strip_discourse_prefix(description).strip(" ,.;:\"'`()[]")
             if description and 4 <= len(description.split()) <= 24:
-                # Ensure the term contains a content word.
                 term_tokens = re.findall(r"[A-Za-z][A-Za-z'-]+", term)
                 if term_tokens and any(
                     token[0].isupper() or len(token) >= 4 for token in term_tokens
@@ -460,26 +404,21 @@ def make_definition_question(sentence: str) -> tuple[str, str, str] | None:
     subject_raw = base[: match.start()]
     predicate_raw = base[match.end():]
     predicate = predicate_raw.strip(" ,.;:\"'`()[]")
-    # Make predicate length stricter: 4-16 words for good definitions
-    # Reject very long predicates that are likely complex narratives
     if not predicate or len(predicate.split()) < 4 or len(predicate.split()) > 16:
         return None
     
-    # Reject predicates that look like complex clauses with multiple verbs (e.g., "were expelled from... by... supporting...")
-    # These are not clear definitions but rather narrative/descriptive clauses
     predicate_lower = predicate.lower()
     
-    # Check for patterns that indicate this is narrative, not definition
     complex_patterns = [
-        r'\b(?:were|was|had)\s+(?:expelled|established|founded|overthrown)',  # passive constructions that describe events
-        r'\b(?:by|from|through)\s+(?:American|Taliban|coalition)',  # location/agent descriptions that imply narrative
-        r',\s*(?:thus|therefore|consequently)',  # consequence clauses
-        r'\b(?:and|or)\s+(?:which|that|thus|therefore)',  # complex subordination
+        r'\b(?:were|was|had)\s+(?:expelled|established|founded|overthrown)',
+        r'\b(?:by|from|through)\s+(?:American|Taliban|coalition)',
+        r',\s*(?:thus|therefore|consequently)',
+        r'\b(?:and|or)\s+(?:which|that|thus|therefore)',
     ]
     
     for pattern in complex_patterns:
         if re.search(pattern, predicate_lower):
-            return None  # Skip definitions that look like narratives
+            return None
     
     subject = _clean_subject_for_definition(subject_raw)
     if not subject:
@@ -489,21 +428,12 @@ def make_definition_question(sentence: str) -> tuple[str, str, str] | None:
         stem = f'According to the passage, what does "{subject}" {verb}?'
     elif verb in {"describes", "involves", "includes", "indicates"}:
         stem = f'According to the passage, what does "{subject}" {verb}?'
-    else:  # is / are / was / were
+    else:
         stem = f'According to the passage, what is "{subject}"?'
     return stem, predicate, sentence_clean
 
 
 def make_wh_question_candidates(sentence: str, answer: str) -> list[dict[str, str]]:
-    """Build Wh-style and cloze candidates for the given (sentence, answer).
-
-    Templates include:
-      * ``wh_subject`` — e.g. "Who was ill?"
-      * ``passage_according`` — same fact with an "According to the passage" lead-in
-      * ``detail_context`` / ``fact_about_topic`` — no underscores; the stem points at a
-        passage context and the correct phrase is chosen from the options
-      * ``cloze_statement`` / ``cloze_trailing`` — sentence with ``____`` redaction
-    """
     sentence = (sentence or "").strip()
     answer = (answer or "").strip()
     if not sentence or not answer:
@@ -551,8 +481,6 @@ def make_wh_question_candidates(sentence: str, answer: str) -> list[dict[str, st
 
     topic = _topic_phrase(sentence, answer)
     if topic:
-        # Only generate more specific "which" questions when we have a clear topic
-        # Skip the generic "which option" templates as they're often vague
         pass
 
     if _has_enough_remainder(redacted_full):
@@ -600,11 +528,6 @@ def _question_dense_features(questions: list[str], articles: list[str]) -> np.nd
 
 
 def _build_synthetic_pool(article: str, real_question: str) -> list[str]:
-    """Make weak negative examples for ranker training.
-
-    We do not need a perfect templater here; we only need synthetic questions
-    that look reasonable enough that the ranker has to learn real fluency cues.
-    """
     from src.text_utils import extract_answer_candidates, split_sentences
 
     sentences = split_sentences(article)[:8]
@@ -650,10 +573,6 @@ def build_question_ranker_dataset(
 def fit_question_ranker(
     train_questions: pd.DataFrame, max_articles: int = 3000, seed: int = 42
 ) -> tuple[CountVectorizer, "object", dict[str, object]]:
-    """Train a Logistic Regression ranker on real vs synthetic questions.
-
-    Returns (vectorizer, classifier, metrics).
-    """
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import accuracy_score, f1_score
 

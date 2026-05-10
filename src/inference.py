@@ -156,8 +156,8 @@ class QuizEngine:
         x = build_feature_blocks(df, self.vectorizer_a, fit=False)
         probabilities = self.logistic.predict_proba(x)[:, 1]
         evidence = self._passage_evidence_scores(article, question, options)
-        # Blend Model A probabilities with a passage-evidence signal so factoid questions
-        # whose answer literally co-occurs with question keywords in a sentence rank higher.
+
+
         prob_norm = probabilities / probabilities.sum() if probabilities.sum() > 0 else probabilities
         combined = 0.65 * prob_norm + 0.35 * evidence
         best_index = int(np.argmax(combined))
@@ -183,9 +183,6 @@ class QuizEngine:
         return result
 
     def _passage_evidence_scores(self, article: str, question: str, options: dict[str, str]) -> np.ndarray:
-        """Score each option by how strongly its words co-occur with the question's content
-        words inside the same article sentence. Helps factoid questions whose answer is
-        literally stated near the question keywords (e.g. 'Who was ill?' -> 'X was ill')."""
         stopwords = {
             "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
             "of", "to", "in", "on", "at", "by", "for", "with", "as", "and", "or",
@@ -389,7 +386,6 @@ class QuizEngine:
                 article[index : index + 180] for index in range(0, max(len(article), 1), 180) if article[index : index + 180].strip()
             ]
 
-        # Pre-build definition-style specs (X is Y → "What does 'X' refer to?")
         definition_specs: list[dict[str, str]] = []
         seen_def_subjects: set[str] = set()
         for sentence in split_sentences(article):
@@ -418,8 +414,6 @@ class QuizEngine:
         def_index = 0
 
         while len(specs) < count:
-            # Interleave: take a definition spec roughly every 3 questions so a
-            # 5-question quiz mixes definition stems with the regular pair pool.
             inject_definition = def_index < len(definition_specs) and (len(specs) % 3 == 1)
             if inject_definition:
                 spec = definition_specs[def_index]
@@ -536,23 +530,18 @@ class QuizEngine:
                 hint_scorer_weight=float(cfg.get("hint_scorer_weight", 0.4)),
             )
         
-        # For cloze questions with provided sentence, generate dynamic contextual hints
         from src.model_b_train import _generate_contextual_hint
         
-        # Determine Wh-word type
         wh_word = "what"
         for wh in ["who", "what", "where", "when", "why", "how", "which"]:
             if question.lower().startswith(wh):
                 wh_word = wh
                 break
         
-        # Generate contextual first hint
         first_hint = _generate_contextual_hint(question, answer, wh_word)
         
-        # Second hint: redacted sentence (with blank)
         second_hint = redact_answer(sentence, answer, count=1)
         
-        # Third hint: info about the answer
         word_count = len(answer.split())
         third_hint = f"The answer has {word_count} word(s) and appears in the given sentence."
         

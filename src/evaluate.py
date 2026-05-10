@@ -1,7 +1,3 @@
-"""End-to-end evaluation across Model A (verifier), Model B (distractors + hints).
-
-Run as ``python -m src.evaluate``. Writes ``models/evaluation_metrics.json``.
-"""
 from __future__ import annotations
 
 import argparse
@@ -83,10 +79,6 @@ def evaluate_text_generation_model_a(engine: QuizEngine, df: pd.DataFrame) -> di
 
 
 def evaluate_text_generation_model_b(engine: QuizEngine, df: pd.DataFrame) -> dict[str, object]:
-    """Evaluate Model B's question generation quality using ROUGE, BLEU, and METEOR scores.
-    
-    Model B generates questions using its TF-IDF + Word2Vec vectorizer and heuristics.
-    """
     try:
         if not engine.model_b_loaded:
             return {"reason": "Model B artifacts missing"}
