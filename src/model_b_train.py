@@ -133,7 +133,7 @@ def _load_questions(split: str) -> pd.DataFrame:
 
 
 
-def char_level_match(a: str, b: str) -> float:
+def _char_level_match(a: str, b: str) -> float:
     """Longest matching substring length divided by max length, in [0, 1]."""
     a = (a or "").lower()
     b = (b or "").lower()
@@ -204,7 +204,7 @@ def compute_distractor_features(
         rows[i, 2] = float(w2v_answer[i])
         rows[i, 3] = float(w2v_question[i])
         rows[i, 4] = float(freq) / float(max_freq)
-        rows[i, 5] = char_level_match(candidate, answer or "")
+        rows[i, 5] = _char_level_match(candidate, answer or "")
         rows[i, 6] = float(len(candidate.split()))
         rows[i, 7] = float(bool(_content_tokens(candidate) & answer_tokens))
     return rows
@@ -336,90 +336,6 @@ def _train_distractor_ranker(
         metrics["validation_recall"] = float(recall_score(y_val, pred, zero_division=0))
     return classifier, metrics
 
-
-def _leaves_enough_remainder(answer: str, sentences: list[str], min_words: int = 4) -> bool:
-    answer_lower = answer.lower()
-    pattern = re.compile(re.escape(answer), flags=re.IGNORECASE)
-    for sentence in sentences:
-        if answer_lower not in sentence.lower():
-            continue
-        scrubbed = pattern.sub(" ", sentence, count=1)
-        words = [w for w in re.findall(r"[A-Za-z][A-Za-z'-]+", scrubbed) if len(w) >= 3]
-        if len(words) >= min_words:
-            return True
-    return False
-
-
-def _generation_answer_candidates(article: str, sentences: list[str], max_phrases: int = 100) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for phrase in extract_candidate_phrases(article, max_candidates=max_phrases):
-        key = phrase.strip().lower()
-        if len(key) < 4 or key in seen:
-            continue
-        if len(phrase.split()) > 8:
-            continue
-        if not any(key in s.lower() for s in sentences):
-            continue
-        if not _leaves_enough_remainder(phrase, sentences):
-            continue
-        seen.add(key)
-        out.append(phrase.strip())
-    for sentence in sentences:
-        for c in extract_answer_candidates(sentence, max_candidates=8):
-            key = c.strip().lower()
-            if len(key) < 4 or key in seen:
-                continue
-            if len(c.split()) > 8:
-                continue
-            if not any(key in s.lower() for s in sentences):
-                continue
-            if not _leaves_enough_remainder(c, sentences):
-                continue
-            seen.add(key)
-            out.append(c.strip())
-    return out
-
-
-def rank_generation_sentence_answer_pairs(
-    article: str,
-    vectorizer: TfidfVectorizer,
-    w2v: "KeyedVectors | None" = None,
-    generation_w2v_blend: float = 0.38,
-) -> list[tuple[float, str, str]]:
-    sentences = [s for s in split_sentences(article) if 25 <= len(s.strip()) <= 280]
-    if not sentences and article.strip():
-        sentences = [article.strip()[:400]]
-    if not sentences:
-        return []
-    pool = _generation_answer_candidates(article, sentences, max_phrases=100)
-    if not pool:
-        return []
-    triples: list[tuple[float, str, str]] = []
-    sent_x = vectorizer.transform(sentences)
-    for cand in pool:
-        a_x = vectorizer.transform([cand])
-        tfidf_sims = cosine_similarity(sent_x, a_x).ravel()
-        if w2v is not None and generation_w2v_blend > 0:
-            w2v_sims = _w2v_cosine_to_ref(sentences, cand, w2v)
-            combined = _blend_tfidf_w2v(tfidf_sims, w2v_sims, generation_w2v_blend)
-        else:
-            combined = tfidf_sims.astype(np.float64)
-        for i, sent in enumerate(sentences):
-            if cand.lower() not in sent.lower():
-                continue
-            triples.append((float(combined[i]), sent, cand))
-    if not triples:
-        return []
-    triples.sort(key=lambda x: -x[0])
-    best_per_sentence: dict[str, tuple[float, str, str]] = {}
-    for sc, s, a in triples:
-        key = s.strip()
-        if key not in best_per_sentence or sc > best_per_sentence[key][0]:
-            best_per_sentence[key] = (sc, s, a)
-    return sorted(best_per_sentence.values(), key=lambda x: -x[0])
-
-
 def rank_distractors(
     article: str,
     question: str,
@@ -481,7 +397,7 @@ def rank_distractors(
     frequency = np.array([article_lower.count(candidate.lower()) for candidate in unique], dtype=float)
     if frequency.max() > 0:
         frequency = frequency / frequency.max()
-    char_overlap = np.array([char_level_match(candidate, answer) for candidate in unique], dtype=float)
+    char_overlap = np.array([_char_level_match(candidate, answer) for candidate in unique], dtype=float)
     base_scores = (
         (0.45 * answer_sim)
         + (0.30 * question_sim)
@@ -512,7 +428,7 @@ def rank_distractors(
     selected_w2v: list[np.ndarray] = []
     for index in np.argsort(scores)[::-1]:
         candidate = unique[int(index)]
-        vector = candidate_x[int(index)]
+        vector = candidate_x[int(index)] # type: ignore
         diversity_penalty = 0.0
         if selected_vectors:
             diversity_penalty = float(max(cosine_similarity(vector, other).ravel()[0] for other in selected_vectors))
@@ -591,7 +507,7 @@ def _build_hint_training_set(
         sims = cosine_similarity(sent_x, question_x).ravel()
         feats = _hint_features(question, answer_text, sentences)
         feature_rows.append(feats)
-        target_rows.extend(sims.tolist())
+        target_rows.extend(sims.tolist()) # type: ignore
     if not feature_rows:
         return np.zeros((0, len(HINT_FEATURE_NAMES))), np.zeros(0, dtype=float)
     return np.vstack(feature_rows), np.asarray(target_rows, dtype=float)
@@ -621,64 +537,6 @@ def _train_hint_scorer(
         metrics["validation_r2"] = float(r2_score(y_val, predictions))
     return model, metrics
 
-
-
-
-def generate_hints(
-    article: str,
-    question: str,
-    answer: str,
-    vectorizer: TfidfVectorizer,
-    w2v=None,
-    hint_w2v_blend: float = 0.42,
-    hint_scorer=None,
-    hint_scorer_weight: float = 0.4,
-) -> list[str]:
-    sentences = [s for s in split_sentences(article) if len(s.strip()) > 20]
-    if not sentences:
-        return [
-            "Review the passage carefully.",
-            "Look for wording that overlaps with the question.",
-            "The answer appears directly in the passage.",
-        ]
-
-    # Score sentences by relevance to the question
-    sentence_x = vectorizer.transform(sentences)
-    question_x = vectorizer.transform([question])
-    scores = cosine_similarity(sentence_x, question_x).ravel()
-
-    if w2v is not None:
-        scores_w2v = _w2v_cosine_to_ref(sentences, question, w2v)
-        scores = _blend_tfidf_w2v(scores, scores_w2v, hint_w2v_blend)
-
-    if hint_scorer is not None:
-        feats = _hint_features(question, answer, sentences)
-        try:
-            ml_scores = hint_scorer.predict(feats)
-            scores = (1.0 - hint_scorer_weight) * _normalize01(scores) + hint_scorer_weight * _normalize01(ml_scores)
-        except Exception:
-            pass
-
-    ordered = [sentences[int(i)] for i in np.argsort(scores)[::-1]]
-    support = ordered[0]  # most relevant sentence
-    secondary = ordered[1] if len(ordered) > 1 else ordered[0]  # second most relevant
-
-    # Hint 1: a related sentence that does NOT contain the answer — general context
-    hint1 = next(
-        (s for s in ordered if answer.lower() not in s.lower()),
-        secondary  # fallback if all sentences contain the answer
-    )
-
-    # Hint 2: the most relevant sentence with the answer partially obscured
-    # keep first word of answer as a starting clue
-    first_word = answer.split()[0] if answer.split() else ""
-    hint2 = support.replace(answer, f"{first_word}...") if answer in support else support
-
-    # Hint 3: the sentence with answer fully blanked + word count
-    word_count = len(answer.split())
-    hint3 = support.replace(answer, "____") + f" ({word_count} words)"
-
-    return [hint1, hint2, hint3]
 
 def _set_overlap_metrics(predicted: list[str], gold: list[str]) -> tuple[float, float, float]:
     pred_set = {p.strip().lower() for p in predicted if p}
@@ -808,10 +666,8 @@ def _evaluate_hints(
 
 def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:
     train_df = _load_questions("train")
-    try:
-        val_df = _load_questions("validation")
-    except Exception:
-        val_df = train_df.tail(0)
+    val_df = _load_questions("validation")
+
     corpus = pd.concat(
         [
             train_df["article"].astype(str),

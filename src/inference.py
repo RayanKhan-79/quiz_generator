@@ -15,9 +15,9 @@ import numpy as np
 import pandas as pd
 
 from src.model_a_train import MODEL_DIR as MODEL_A_DIR
-from src.model_a_train import build_feature_blocks
+from src.model_a_train import build_feature_blocks, rank_generation_sentence_answer_pairs
 from src.model_b_train import MODEL_DIR as MODEL_B_DIR
-from src.model_b_train import generate_hints, rank_distractors, rank_generation_sentence_answer_pairs
+from src.model_b_train import rank_distractors
 from src.question_generation import (
     make_definition_question,
     make_wh_question_candidates,
@@ -356,7 +356,7 @@ class QuizEngine:
                     "question": provided_question,
                     "answer": options["A"],
                     "sentence": "",
-                    "use_provided_options": True,
+                    "use_provided_options": True, # type: ignore
                 }
             )
         if len(specs) >= count:

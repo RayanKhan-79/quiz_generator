@@ -24,14 +24,17 @@ from sklearn.metrics import (
     recall_score,
     silhouette_score,
 )
-from sklearn.metrics.pairwise import paired_cosine_distances
+from gensim.models import KeyedVectors
+from sklearn.metrics.pairwise import cosine_similarity, paired_cosine_distances
 from sklearn.mixture import GaussianMixture
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.semi_supervised import LabelPropagation
 from sklearn.svm import LinearSVC
 
+from src.model_b_train import _blend_tfidf_w2v, _w2v_cosine_to_ref
 from src.preprocessing import OPTION_LABELS, PROCESSED_DIR, preprocess_all
 from src.question_generation import fit_question_ranker
+from src.text_utils import extract_answer_candidates, extract_candidate_phrases, split_sentences
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "models" / "model_a"
@@ -69,7 +72,7 @@ def build_feature_blocks(df: pd.DataFrame, vectorizer: TfidfVectorizer, fit: boo
             "article_question_sim": _cosine_similarity_rows(article_x, question_x),
             "article_option_sim": _cosine_similarity_rows(article_x, option_x),
             "question_option_sim": _cosine_similarity_rows(question_x, option_x),
-            "option_len": options.map(lambda value: len(value.split())).to_numpy(),
+            "option_len": options.map(lambda value: len(value.split())).to_numpy(), # type: ignore
         }
     )
     return hstack([x_text, dense_features.to_numpy()], format="csr")
@@ -106,8 +109,8 @@ def _similarity_scores(df: pd.DataFrame, vectorizer: TfidfVectorizer) -> np.ndar
         article_x = vectorizer.transform([str(group.iloc[0]["article"])])
         question_x = vectorizer.transform([str(group.iloc[0]["question"])])
         option_x = vectorizer.transform(group["option_text"].astype(str))
-        article_scores = (option_x @ article_x.T).toarray().ravel()
-        question_scores = (option_x @ question_x.T).toarray().ravel()
+        article_scores = (option_x @ article_x.T).toarray().ravel() # type: ignore
+        question_scores = (option_x @ question_x.T).toarray().ravel() # type: ignore
         combined = (0.45 * article_scores) + (0.55 * question_scores)
         span = combined.max() - combined.min()
         normalized = np.full(len(group), 0.25) if span <= 1e-9 else (combined - combined.min()) / span
@@ -221,10 +224,10 @@ def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:
     x_val = build_feature_blocks(val_df, vectorizer, fit=False)
 
     logistic = LogisticRegression(max_iter=1000, solver="liblinear", random_state=42)
-    logistic.fit(x_train, y_train)
+    logistic.fit(x_train, y_train) # type: ignore
 
     svm = CalibratedClassifierCV(LinearSVC(random_state=42), cv=3)
-    svm.fit(x_train, y_train)
+    svm.fit(x_train, y_train) # type: ignore
 
     nb_text_train = vectorizer.transform(
         train_df["question"].astype(str) + " [OPTION] " + train_df["option_text"].astype(str)
@@ -244,7 +247,7 @@ def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:
         random_state=42,
         class_weight="balanced",
     )
-    random_forest.fit(rf_features, rf_labels)
+    random_forest.fit(rf_features, rf_labels) # type: ignore
 
     xgb_model = None
     try:
@@ -282,19 +285,19 @@ def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:
         cv=3,
         n_jobs=-1,
     )
-    stacking.fit(stack_features, stack_labels)
+    stacking.fit(stack_features, stack_labels) # type: ignore
 
     kmeans = KMeans(n_clusters=2, random_state=42, n_init="auto")
-    kmeans.fit(x_train)
+    kmeans.fit(x_train) # type: ignore
 
     cluster_features, cluster_labels, _ = _subsample(x_train, y_train.to_numpy(), sample_size=15_000)
     svd = TruncatedSVD(n_components=64, random_state=42)
-    cluster_features_dense = svd.fit_transform(cluster_features)
+    cluster_features_dense = svd.fit_transform(cluster_features) # type: ignore
     gmm = GaussianMixture(n_components=2, random_state=42, max_iter=120)
     gmm_assignments = gmm.fit_predict(cluster_features_dense)
 
     lp_features, lp_labels, _ = _subsample(x_train, y_train.to_numpy(), sample_size=4_000)
-    lp_features_dense = svd.transform(lp_features)
+    lp_features_dense = svd.transform(lp_features) # type: ignore
     rng = np.random.default_rng(42)
     mask = rng.random(len(lp_labels)) < 0.85
     semi_labels = lp_labels.copy().astype(int)
@@ -320,16 +323,16 @@ def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:
     wh_naive_bayes = MultinomialNB()
     wh_naive_bayes.fit(wh_x_train, wh_y_train)
     wh_predictions = wh_naive_bayes.predict(wh_x_val)
-    wh_labels_sorted = sorted({*wh_y_train.tolist(), *wh_y_val.tolist()})
+    wh_labels_sorted = sorted({*wh_y_train.tolist(), *wh_y_val.tolist()}) # type: ignore
 
     question_ranker_vec, question_ranker_clf, question_ranker_metrics = fit_question_ranker(train_questions)
 
-    lr_prob = logistic.predict_proba(x_val)[:, 1]
-    svm_prob = svm.predict_proba(x_val)[:, 1]
+    lr_prob = logistic.predict_proba(x_val)[:, 1] # type: ignore
+    svm_prob = svm.predict_proba(x_val)[:, 1] # type: ignore
     nb_prob = naive_bayes.predict_proba(nb_text_val)[:, 1]
-    rf_prob = random_forest.predict_proba(x_val)[:, 1]
+    rf_prob = random_forest.predict_proba(x_val)[:, 1] # type: ignore
     ohe_prob = ohe_logistic.predict_proba(ohe_x_val)[:, 1]
-    stack_prob = stacking.predict_proba(x_val)[:, 1]
+    stack_prob = stacking.predict_proba(x_val)[:, 1] # type: ignore
     ensemble_prob = (lr_prob + svm_prob) / 2.0
     full_ensemble_prob = (lr_prob + svm_prob + nb_prob + rf_prob) / 4.0
     similarity_prob = _similarity_scores(val_df, vectorizer)
@@ -356,12 +359,12 @@ def train(model_dir: Path = MODEL_DIR) -> dict[str, object]:
             "confusion_matrix": confusion_matrix(wh_y_val, wh_predictions, labels=wh_labels_sorted).tolist(),
         },
         "kmeans_full": {
-            "n_clusters": int(kmeans.n_clusters),
+            "n_clusters": int(kmeans.n_clusters), # type: ignore
             "cluster_counts": pd.Series(kmeans.labels_).value_counts().sort_index().to_dict(),
             "purity": _purity_score(y_train.to_numpy(), kmeans.labels_),
         },
         "kmeans_subsample_silhouette": _evaluate_clustering(
-            cluster_labels, kmeans.predict(cluster_features), features=cluster_features
+            cluster_labels, kmeans.predict(cluster_features), features=cluster_features # type: ignore
         ),
         "gaussian_mixture_subsample": _evaluate_clustering(
             cluster_labels, gmm_assignments, features=cluster_features_dense
@@ -442,15 +445,96 @@ def _build_model_comparison_table(metrics: dict[str, object]) -> list[dict[str, 
             {
                 "model": name,
                 "family": family,
-                "accuracy": entry.get("accuracy"),
-                "macro_f1": entry.get("macro_f1"),
-                "precision": entry.get("precision"),
-                "recall": entry.get("recall"),
-                "exact_match_answer_accuracy": entry.get("exact_match_answer_accuracy"),
+                "accuracy": entry.get("accuracy"), # type: ignore
+                "macro_f1": entry.get("macro_f1"), # type: ignore
+                "precision": entry.get("precision"), # type: ignore
+                "recall": entry.get("recall"), # type: ignore
+                "exact_match_answer_accuracy": entry.get("exact_match_answer_accuracy"), # type: ignore
             }
         )
     return rows
 
+def _leaves_enough_remainder(answer: str, sentences: list[str], min_words: int = 4) -> bool:
+    answer_lower = answer.lower()
+    pattern = re.compile(re.escape(answer), flags=re.IGNORECASE)
+    for sentence in sentences:
+        if answer_lower not in sentence.lower():
+            continue
+        scrubbed = pattern.sub(" ", sentence, count=1)
+        words = [w for w in re.findall(r"[A-Za-z][A-Za-z'-]+", scrubbed) if len(w) >= 3]
+        if len(words) >= min_words:
+            return True
+    return False
+
+
+def _generation_answer_candidates(article: str, sentences: list[str], max_phrases: int = 100) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for phrase in extract_candidate_phrases(article, max_candidates=max_phrases):
+        key = phrase.strip().lower()
+        if len(key) < 4 or key in seen:
+            continue
+        if len(phrase.split()) > 8:
+            continue
+        if not any(key in s.lower() for s in sentences):
+            continue
+        if not _leaves_enough_remainder(phrase, sentences):
+            continue
+        seen.add(key)
+        out.append(phrase.strip())
+    for sentence in sentences:
+        for c in extract_answer_candidates(sentence, max_candidates=8):
+            key = c.strip().lower()
+            if len(key) < 4 or key in seen:
+                continue
+            if len(c.split()) > 8:
+                continue
+            if not any(key in s.lower() for s in sentences):
+                continue
+            if not _leaves_enough_remainder(c, sentences):
+                continue
+            seen.add(key)
+            out.append(c.strip())
+    return out
+
+
+def rank_generation_sentence_answer_pairs(
+    article: str,
+    vectorizer: TfidfVectorizer,
+    w2v: "KeyedVectors | None" = None,
+    generation_w2v_blend: float = 0.38,
+) -> list[tuple[float, str, str]]:
+    sentences = [s for s in split_sentences(article) if 25 <= len(s.strip()) <= 280]
+    if not sentences and article.strip():
+        sentences = [article.strip()[:400]]
+    if not sentences:
+        return []
+    pool = _generation_answer_candidates(article, sentences, max_phrases=100)
+    if not pool:
+        return []
+    triples: list[tuple[float, str, str]] = []
+    sent_x = vectorizer.transform(sentences)
+    for cand in pool:
+        a_x = vectorizer.transform([cand])
+        tfidf_sims = cosine_similarity(sent_x, a_x).ravel()
+        if w2v is not None and generation_w2v_blend > 0:
+            w2v_sims = _w2v_cosine_to_ref(sentences, cand, w2v)
+            combined = _blend_tfidf_w2v(tfidf_sims, w2v_sims, generation_w2v_blend)
+        else:
+            combined = tfidf_sims.astype(np.float64)
+        for i, sent in enumerate(sentences):
+            if cand.lower() not in sent.lower():
+                continue
+            triples.append((float(combined[i]), sent, cand))
+    if not triples:
+        return []
+    triples.sort(key=lambda x: -x[0])
+    best_per_sentence: dict[str, tuple[float, str, str]] = {}
+    for sc, s, a in triples:
+        key = s.strip()
+        if key not in best_per_sentence or sc > best_per_sentence[key][0]:
+            best_per_sentence[key] = (sc, s, a)
+    return sorted(best_per_sentence.values(), key=lambda x: -x[0])
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train Model A traditional ML, ensembles, and unsupervised baselines.")
